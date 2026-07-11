@@ -1,0 +1,21 @@
+-- 0008_service_deactivated_at.sql
+--
+-- Soft-delete-with-expiry for the services catalog (like an OS Trash). Deactivating
+-- a service moves it to "Trash": it stays in the DB, hidden from new procedure
+-- lines, and is permanently purged after a retention window (SERVICE_RETENTION_DAYS,
+-- 7 days). Reactivating ("Restore") clears the timestamp and cancels the deletion.
+--
+--   * services.deactivated_at - when the service was moved to Trash. NULL while
+--     active (or reactivated). The purge only ever touches rows where this is set
+--     AND older than the window, so services deactivated BEFORE this feature
+--     shipped (deactivated_at NULL) are never retroactively deleted.
+--
+-- Safe to hard-delete on expiry: bill_items snapshots description + unit_price_paise
+-- + line_total_paise at billing time, so a past bill reprints fully without the
+-- services row. The purge detaches the analytics-only FK (bill_items.service_id →
+-- NULL) inside a transaction, then deletes, and audit-logs each removal - so
+-- nothing referenced is broken and a trace remains (DEVELOPMENT_RULES §4).
+--
+-- Forward-only. Existing rows get NULL (active rows and pre-feature inactive rows).
+
+ALTER TABLE services ADD COLUMN deactivated_at TIMESTAMPTZ;

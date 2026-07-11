@@ -1,26 +1,143 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * LIGHT THEME ONLY (plan D1). This is an internal counter on a fixed clinic PC;
+ * calm, predictable visuals matter and nothing should change with the OS theme.
+ * shadcn's `.dark` token block is intentionally removed. The `dark` variant below
+ * is kept but bound to a `.dark` class that is NEVER applied, so any stray `dark:`
+ * utilities left in shadcn component source stay inert - WITHOUT it, Tailwind v4's
+ * `dark:` would fall back to `prefers-color-scheme` and re-enable OS dark styling.
+ * Do not add a `.dark` block, next-themes, or a theme toggle.
+ */
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Fonts stay Geist, loaded via next/font in app/layout.tsx (plan D3). */
+  --font-sans: var(--font-hanken);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-hanken);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/*
+ * Palette imported from the claude.ai/design "User Management" project: warm
+ * off-white canvas, near-black warm ink, and a teal accent. Kept as the light
+ * theme (the app is light-only, plan D1). Colour still reads as status where it
+ * matters (teal = active/primary, red = destructive), which fits dev-rules §5.
+ */
+:root {
+  --background: #f7f6f4; /* warm canvas */
+  --foreground: #1c1b19; /* warm near-black ink */
+  --card: #ffffff;
+  --card-foreground: #1c1b19;
+  --popover: #ffffff;
+  --popover-foreground: #1c1b19;
+  --primary: #0d9488; /* teal 600 */
+  --primary-foreground: #ffffff;
+  --secondary: #f0efec; /* neutral chip */
+  --secondary-foreground: #3a3a37;
+  --muted: #f2f1ee;
+  --muted-foreground: #8a8983;
+  --accent: #f0fdfa; /* teal soft */
+  --accent-foreground: #115e59; /* teal 800 */
+  --destructive: #dc2626;
+  --border: #e7e5e1;
+  --input: #e3e1dd;
+  --ring: #0d9488;
+  --chart-1: #0d9488;
+  --chart-2: #0f766e;
+  --chart-3: #115e59;
+  --chart-4: #134e4a;
+  --chart-5: #042f2e;
+  --radius: 0.4rem; /* reduced per request - crisper, less pill-like corners */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1c1b19;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0fdfa;
+  --sidebar-accent-foreground: #115e59;
+  --sidebar-border: #e7e5e1;
+  --sidebar-ring: #0d9488;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/*
+ * Print - the "My day" handover sheet (reports plan §5). window.print() renders
+ * an A4 tabular sheet: hide the app chrome (the sticky top bar <header>) and any
+ * on-screen-only controls ([data-no-print]), drop the page padding, and force a
+ * white canvas with backgrounds preserved so table headers/status tints still
+ * read on paper. Nothing here is specific to one page - any screen can opt an
+ * element out of print with data-no-print.
+ */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body {
+    background: #fff;
+  }
+  /* The one sticky app bar is the shell <header>; the report's own header is a
+     nested block that must still print, so scope this to a direct child of body's
+     layout shell via the sticky bar's role. */
+  header.sticky,
+  [data-no-print] {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
