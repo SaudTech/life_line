@@ -16,12 +16,16 @@ import { Button } from "@/components/ui/button";
 export function BillRowActions({
   isCancelled,
   replaced,
+  printable = true,
   onPrint,
   onCancel,
   onReissue,
 }: {
   isCancelled: boolean;
   replaced: boolean; // a cancelled bill already re-issued once (one-shot)
+  // Server-resolved: is there a design a print can use for this bill's type?
+  // When false, no Print button renders (print-updates plan §1c).
+  printable?: boolean;
   onPrint: () => void;
   onCancel: () => void;
   onReissue: () => void;
@@ -39,10 +43,12 @@ export function BillRowActions({
         </Button>
       ) : null}
 
-      <Button type="button" variant="ghost" size="sm" onClick={onPrint}>
-        <Printer aria-hidden />
-        Print
-      </Button>
+      {printable ? (
+        <Button type="button" variant="ghost" size="sm" onClick={onPrint}>
+          <Printer aria-hidden />
+          Print
+        </Button>
+      ) : null}
 
       {showCancelMenu ? (
         <Popover open={open} onOpenChange={setOpen}>

@@ -117,9 +117,13 @@ function pricedLineFor(
 export function ProcedureFlow({
   services,
   reissue,
+  printable,
 }: {
   services: ServiceRow[];
   reissue?: ReissueSource | null;
+  // Server-resolved: is there a procedure design a print can use for this
+  // location? Gates the Print button (print-updates plan §1c).
+  printable: boolean;
 }) {
   // STEP 1 - find
   const [query, setQuery] = useState(() => initialReissueQuery(reissue));
@@ -341,7 +345,7 @@ export function ProcedureFlow({
     }
   }
 
-  if (outcome) return <SuccessScreen outcome={outcome} onReset={resetAll} />;
+  if (outcome) return <SuccessScreen outcome={outcome} onReset={resetAll} printable={printable} />;
 
   return (
     <div className={cn("mx-auto max-w-5xl", target && "pb-24 lg:pb-0")}>
@@ -893,15 +897,25 @@ function PinDialog({
 }
 
 // ── Success screen ───────────────────────────────────────────────────────────
-function SuccessScreen({ outcome, onReset }: { outcome: ProcedureOutcome; onReset: () => void }) {
+function SuccessScreen({
+  outcome,
+  onReset,
+  printable,
+}: {
+  outcome: ProcedureOutcome;
+  onReset: () => void;
+  printable: boolean;
+}) {
   const printBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     printBtnRef.current?.focus();
   }, []);
 
-  // Keyboard-first (dev-rules §5): "P" prints without reaching for the mouse.
+  // Keyboard-first (dev-rules §5): "P" prints without reaching for the mouse -
+  // only when a usable design exists (print-updates plan §1c).
   useEffect(() => {
+    if (!printable) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key.toLowerCase() === "p" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
@@ -910,7 +924,7 @@ function SuccessScreen({ outcome, onReset }: { outcome: ProcedureOutcome; onRese
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [outcome.billId, outcome.billNumber]);
+  }, [printable, outcome.billId, outcome.billNumber]);
 
   const rows: [string, string][] = [
     ["Patient", `${outcome.patientName} · ${outcome.patientCode}`],
@@ -948,16 +962,23 @@ function SuccessScreen({ outcome, onReset }: { outcome: ProcedureOutcome; onRese
           ))}
         </dl>
         <div className="flex flex-col gap-2 px-6 pb-6">
+          {printable ? (
+            <Button
+              ref={printBtnRef}
+              type="button"
+              className="w-full"
+              onClick={() => printReceipt(outcome.billId, outcome.billNumber)}
+            >
+              <Printer aria-hidden />
+              Print receipt
+            </Button>
+          ) : null}
           <Button
-            ref={printBtnRef}
             type="button"
+            variant={printable ? "outline" : "default"}
             className="w-full"
-            onClick={() => printReceipt(outcome.billId, outcome.billNumber)}
+            onClick={onReset}
           >
-            <Printer aria-hidden />
-            Print receipt
-          </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={onReset}>
             Bill another
           </Button>
         </div>

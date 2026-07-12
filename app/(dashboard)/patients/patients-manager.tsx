@@ -2,22 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowLeft, Pencil, Search, Users, X } from "lucide-react";
+import { Plus, ArrowLeft, Search, Users, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { searchPatientsAction } from "@/lib/patients/actions";
 import type { PatientRow } from "@/lib/patients/repository";
 import { PatientFormDialog } from "./patient-form-dialog";
+import { PatientCard } from "./patient-card";
+import { PatientListRowView } from "./patient-row";
 
 type DialogState = { type: "add" } | { type: "edit"; patient: PatientRow } | null;
 
-// Client shell for the Patients master list (plan §5). Search-driven: the table
-// is too large to preload, so on arrival it shows only the 10 most recent patients
-// (`recent`, from the server) and queries searchPatientsAction (phone prefix or
-// name) as the operator types. Colour is for status only; the layout is a calm,
-// fixed table - no style switcher.
+// Client shell for the Patients master list - mirrors
+// app/(dashboard)/admin/doctors/doctors-manager.tsx: the same card/list layout
+// toggle and card/row components, so all three master-list screens (Users,
+// Doctors, Patients) read as one design. Search-driven: the list is too large to
+// preload, so on arrival it shows only the 10 most recent patients (`recent`,
+// from the server) and queries searchPatientsAction (phone prefix or name) as
+// the operator types.
 //
 // One phone number can list SEVERAL patients (mother + child) - that's expected,
 // not a bug, and the results are never deduped by phone.
@@ -26,6 +31,7 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
   const [results, setResults] = useState<PatientRow[]>([]);
   const [pending, setPending] = useState(false);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [layout, setLayout] = useState<"card" | "list">("card");
 
   // Guard against out-of-order responses: only the latest query's results win.
   const latest = useRef(0);
@@ -83,35 +89,65 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-5">
-        <Search
-          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden
-        />
-        <Input
-          type="search"
-          inputMode="search"
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by phone, name, or patient ID…"
-          aria-label="Search patients by phone, name, or patient ID"
-          className="pl-9 pr-8"
-        />
-        {query ? (
+      {/* Search + layout toggle */}
+      <div className="mb-5 flex flex-wrap items-center gap-2.5">
+        <div className="relative min-w-[210px] flex-1">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <Input
+            type="search"
+            inputMode="search"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by phone, name, or patient ID…"
+            aria-label="Search patients by phone, name, or patient ID"
+            className="pl-9 pr-8"
+          />
+          {query ? (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          ) : null}
+        </div>
+
+        {/* Card / list layout toggle. */}
+        <div className="flex h-9 items-center gap-0.5 rounded-lg border bg-white p-1">
           <button
             type="button"
-            onClick={() => setQuery("")}
-            aria-label="Clear search"
-            className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Card view"
+            aria-pressed={layout === "card"}
+            onClick={() => setLayout("card")}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              layout === "card" && "bg-accent text-accent-foreground",
+            )}
           >
-            <X className="size-4" aria-hidden />
+            <LayoutGrid className="size-4" aria-hidden />
           </button>
-        ) : null}
+          <button
+            type="button"
+            aria-label="List view"
+            aria-pressed={layout === "list"}
+            onClick={() => setLayout("list")}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              layout === "list" && "bg-accent text-accent-foreground",
+            )}
+          >
+            <List className="size-4" aria-hidden />
+          </button>
+        </div>
       </div>
 
-      {/* Caption: what the table is currently showing. */}
+      {/* Caption: what the list is currently showing. */}
       {rows.length > 0 ? (
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {isSearching
@@ -121,75 +157,23 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
       ) : null}
 
       {rows.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Patient ID</th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Name</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Age</th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Phone</th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Area</th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Added</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-b border-border/60 last:border-b-0 transition-colors hover:bg-muted/30"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs font-medium text-foreground">
-                      {p.patient_code}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-foreground">{p.name}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                      {p.age ?? <span className="text-muted-foreground/60">-</span>}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {p.phone ? (
-                        <button
-                          type="button"
-                          onClick={() => copyPhone(p.phone!)}
-                          title="Click to copy"
-                          aria-label={`Copy phone ${p.phone}`}
-                          className="rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {formatPhone(p.phone)}
-                        </button>
-                      ) : (
-                        <span className="text-muted-foreground/60">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {p.area || <span className="text-muted-foreground/60">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatAdded(p.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDialog({ type: "edit", patient: p })}
-                        >
-                          <Pencil aria-hidden />
-                          Edit
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        layout === "card" ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(288px,1fr))] gap-3.5">
+            {rows.map((p) => (
+              <PatientCard key={p.id} patient={p} onEdit={() => setDialog({ type: "edit", patient: p })} />
+            ))}
           </div>
-        </div>
+        ) : (
+          <div className="divide-y overflow-hidden rounded-md border">
+            {rows.map((p) => (
+              <PatientListRowView
+                key={p.id}
+                patient={p}
+                onEdit={() => setDialog({ type: "edit", patient: p })}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card/40 px-6 py-14 text-center">
           <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">
@@ -238,42 +222,4 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
       ) : null}
     </div>
   );
-}
-
-// Display-only phone grouping. Indian numbers read best space-separated (a
-// 10-digit mobile as "98765 43210"); US-style parentheses don't fit, so we only
-// add spaces. The stored value is untouched - see copyPhone. Unusual lengths are
-// shown exactly as entered rather than grouped oddly.
-function formatPhone(raw: string | null): string {
-  if (!raw) return "";
-  const d = raw.replace(/\D/g, "");
-  if (d.length === 10) return `${d.slice(0, 5)} ${d.slice(5)}`;
-  if (d.length === 12 && d.startsWith("91")) {
-    const n = d.slice(2);
-    return `+91 ${n.slice(0, 5)} ${n.slice(5)}`;
-  }
-  if (d.length === 11 && d.startsWith("0")) {
-    const n = d.slice(1);
-    return `0 ${n.slice(0, 5)} ${n.slice(5)}`;
-  }
-  return raw;
-}
-
-// Copy the PLAIN stored number (no spaces/brackets) - what you'd paste into a
-// dialer or a message. The formatted string is only for reading.
-async function copyPhone(raw: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(raw);
-    toast.success("Phone copied", { description: raw });
-  } catch {
-    toast.error("Could not copy the number.");
-  }
-}
-
-// created_at crosses the server-action boundary as a Date; guard the format so an
-// unexpected string never throws.
-function formatAdded(value: Date | string): string {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }

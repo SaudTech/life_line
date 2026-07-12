@@ -17,6 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { fieldsForType, labelFor, type FieldMeta } from "@/lib/printing/fields";
 import {
   activateTemplateAction,
@@ -63,6 +64,30 @@ const TEXT_STYLE_DEFAULTS = {
   underline: false,
 };
 
+// Quick-pick paper sizes for the Paper size control (plan §2). Custom width x
+// height (mm) is entered alongside these.
+const PAPER_PRESETS = [
+  { key: "a4", label: "A4", width: 210, height: 297 },
+  { key: "half", label: "Half-A4", width: 210, height: 148.5 },
+  { key: "a5", label: "A5", width: 148, height: 210 },
+] as const;
+
+// Read a template's page size + reserved top band (basePdf) for seeding the size
+// controls. Defaults to A4 with no reserved band if the design carries a raw/PDF
+// basePdf rather than the {width,height,padding} object our templates use.
+function readBasePdf(t: Template): { width: number; height: number; topMm: number } {
+  const base = (t as { basePdf?: unknown }).basePdf;
+  if (base && typeof base === "object" && "width" in base) {
+    const b = base as { width?: number; height?: number; padding?: number[] };
+    return {
+      width: Number(b.width) || 210,
+      height: Number(b.height) || 297,
+      topMm: Number(b.padding?.[0]) || 0,
+    };
+  }
+  return { width: 210, height: 297, topMm: 0 };
+}
+
 // Editor for ONE design (plan §4b). The bill type is fixed (row.bill_type), so
 // the palette shows exactly that type's catalog fields - no type tabs. "Save"
 // updates THIS row in place; "Save as new" captures the current canvas as a
@@ -79,6 +104,113 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
   const handleRef = useRef<ReceiptDesignerHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageCounterRef = useRef(0);
+
+  // Paper size + reserved letterhead band (plan §2/§3). Seeded from the design's
+  // own basePdf so re-opening a design shows its real size/offset. These drive
+  // BOTH the live template (via updateTemplate) and the on-canvas band overlay -
+  // one source of truth, kept in sync by applyBasePdf below.
+  const initialBase = readBasePdf(row.schema_json);
+  const [paperW, setPaperW] = useState<number>(initialBase.width);
+  const [paperH, setPaperH] = useState<number>(initialBase.height);
+  const [topMm, setTopMm] = useState<number>(initialBase.topMm);
+
+  // Push a new size / letterhead offset onto the live template's basePdf, keeping
+  // the side/bottom margins. Size persists automatically - it's part of schema_json
+  // saved by the existing update/create actions (no schema/repository change, §2).
+  function applyBasePdf(next: { width: number; height: number; topMm: number }) {
+    if (!handleRef.current) return;
+    const current = handleRef.current.getTemplate();
+    const base = current.basePdf;
+    const padding =
+      base && typeof base === "object" && "padding" in base
+        ? (base as { padding?: [number, number, number, number] }).padding ?? [10, 10, 10, 10]
+        : [10, 10, 10, 10];
+    const updated = {
+      ...current,
+      basePdf: {
+        width: next.width,
+        height: next.height,
+        padding: [next.topMm, padding[1] ?? 10, padding[2] ?? 10, padding[3] ?? 10] as [
+          number,
+          number,
+          number,
+          number,
+        ],
+      },
+    } as Template;
+    handleRef.current.updateTemplate(updated);
+  }
+
+  // True if any field would fall outside a page of this size (position + size past
+  // the edge) - drives the shrink warning before we resize smaller (plan §2).
+  function anyFieldOutside(width: number, height: number): boolean {
+    const schemas = handleRef.current?.getTemplate().schemas ?? [];
+    return schemas.flat().some((s) => {
+      const pos = (s as { position?: { x?: number; y?: number } }).position ?? {};
+      const w = (s as { width?: number }).width ?? 0;
+      const h = (s as { height?: number }).height ?? 0;
+      return (pos.x ?? 0) + w > width + 0.5 || (pos.y ?? 0) + h > height + 0.5;
+    });
+  }
+
+  // Apply a new page size (preset or custom). Validate the mm range and warn - but
+  // still allow - if shrinking would clip an existing field (reversible, dev-rules §5).
+  function setPaperSize(width: number, height: number) {
+    if (width < 50 || width > 420 || height < 50 || height > 420) {
+      toast.error("Paper size must be between 50 and 420 mm.");
+      return;
+    }
+    if ((width < paperW || height < paperH) && anyFieldOutside(width, height)) {
+      toast.warning("Some fields now fall outside the page - move them back inside before saving.");
+    }
+    setPaperW(width);
+    setPaperH(height);
+    applyBasePdf({ width, height, topMm });
+  }
+
+  // Resizing the reserved band shifts every field on page 1 by the same delta,
+  // so growing the band pushes existing fields down (out of the new band) and
+  // shrinking it pulls them back up - the band and the fields it displaces move
+  // together in one update (avoids a stale intermediate render from two calls).
+  function setLetterheadTop(mm: number) {
+    const clamped = Math.max(0, Math.min(mm, paperH));
+    const delta = clamped - topMm;
+    setTopMm(clamped);
+    if (!handleRef.current) return;
+    const current = handleRef.current.getTemplate();
+    const base = current.basePdf;
+    const padding =
+      base && typeof base === "object" && "padding" in base
+        ? (base as { padding?: [number, number, number, number] }).padding ?? [10, 10, 10, 10]
+        : [10, 10, 10, 10];
+    const schemas =
+      delta !== 0
+        ? current.schemas.map((page, i) =>
+            i === 0
+              ? page.map((s) => {
+                  const pos = (s as { position?: { x: number; y: number } }).position;
+                  if (!pos) return s;
+                  return { ...s, position: { ...pos, y: Math.max(0, pos.y + delta) } };
+                })
+              : page,
+          )
+        : current.schemas;
+    const updated = {
+      ...current,
+      schemas,
+      basePdf: {
+        width: paperW,
+        height: paperH,
+        padding: [clamped, padding[1] ?? 10, padding[2] ?? 10, padding[3] ?? 10] as [
+          number,
+          number,
+          number,
+          number,
+        ],
+      },
+    } as Template;
+    handleRef.current.updateTemplate(updated);
+  }
 
   // Appends one raw pdfme schema object onto the first page at a naive stacked
   // position (bottom of whatever's already there) and pushes the result to the
@@ -329,6 +461,60 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
         </div>
       </div>
 
+      {/* Paper size + reserved letterhead controls (plan §2/§3). Desktop only -
+          the designer itself is desktop-only below. Keyboard-first: presets are
+          plain buttons, sizes are numeric inputs (calm, status-free, dev-rules §5). */}
+      <div className="mb-3 hidden shrink-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border bg-card px-4 py-2.5 lg:flex">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Paper</span>
+          {PAPER_PRESETS.map((p) => {
+            const active = paperW === p.width && paperH === p.height;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setPaperSize(p.width, p.height)}
+                aria-pressed={active}
+                className={cn(
+                  "rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "border-primary bg-accent text-accent-foreground"
+                    : "text-foreground hover:border-foreground/20 hover:bg-muted/40",
+                )}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          <div className="ml-1 flex items-center gap-1.5">
+            <MmInput
+              value={paperW}
+              ariaLabel="Paper width in millimetres"
+              onCommit={(v) => setPaperSize(v, paperH)}
+            />
+            <span className="text-xs text-muted-foreground">×</span>
+            <MmInput
+              value={paperH}
+              ariaLabel="Paper height in millimetres"
+              onCommit={(v) => setPaperSize(paperW, v)}
+            />
+            <span className="text-xs text-muted-foreground">mm</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">
+            Reserved letterhead
+          </span>
+          <MmInput
+            value={topMm}
+            ariaLabel="Reserved letterhead height in millimetres"
+            onCommit={setLetterheadTop}
+          />
+          <span className="text-xs text-muted-foreground">mm top</span>
+        </div>
+      </div>
+
       {/* Desktop: field palette + Designer canvas, filling all remaining
           vertical space (flex-1 min-h-0) - this is a full-page tool, not a form
           on a page. Below lg, the Designer needs more room than a phone/tablet
@@ -371,7 +557,12 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
           </div>
         </aside>
 
-        <ReceiptDesigner initialTemplate={row.schema_json} handleRef={handleRef} />
+        <ReceiptDesigner
+          initialTemplate={row.schema_json}
+          handleRef={handleRef}
+          reservedTopMm={topMm}
+          pageWidthMm={paperW}
+        />
       </div>
 
       <div className="min-h-0 flex-1 rounded-xl border border-dashed bg-card/40 p-8 text-center text-sm font-medium text-muted-foreground lg:hidden">
@@ -395,6 +586,51 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
         />
       ) : null}
     </div>
+  );
+}
+
+// A small millimetre number input that commits on blur / Enter (not every
+// keystroke), so a partial value mid-typing never resizes the page. Holds its own
+// draft text; the committed number flows back from the parent as `value`.
+function MmInput({
+  value,
+  ariaLabel,
+  onCommit,
+}: {
+  value: number;
+  ariaLabel: string;
+  onCommit: (mm: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  // Reflect an external change (preset click) into the field.
+  const shown = useRef(value);
+  if (shown.current !== value) {
+    shown.current = value;
+    if (draft !== String(value)) setDraft(String(value));
+  }
+  function commit() {
+    const n = Number(draft);
+    if (draft.trim() !== "" && Number.isFinite(n) && n >= 0) onCommit(Math.round(n * 10) / 10);
+    else setDraft(String(value));
+  }
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value.replace(/[^\d.]/g, ""))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+      }}
+      type="number"
+      inputMode="decimal"
+      min={0}
+      max={420}
+      aria-label={ariaLabel}
+      className="h-8 w-16 rounded-md border bg-background px-2 text-center text-sm text-foreground outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
   );
 }
 

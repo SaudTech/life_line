@@ -16,9 +16,9 @@ if (!connectionString) {
 
 // name, department, fee in paise, revisit validity (days)
 const DOCTORS = [
-  ["Dr. Anita Rao", "Cardiology", 50000, 14],
-  ["Dr. Rajesh Menon", "General Medicine", 30000, 7],
-  ["Dr. Priya Nair", "Pediatrics", 40000, 10],
+  ["Dr. Anita Rao", "Cardiologist", 50000, 14],
+  ["Dr. Rajesh Menon", "General Physician", 30000, 7],
+  ["Dr. Priya Nair", "Pediatrician", 40000, 10],
 ];
 
 const client = new pg.Client({ connectionString });

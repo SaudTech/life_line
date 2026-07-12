@@ -15,7 +15,9 @@ function firstErrorPath(input: unknown): string | null {
 describe("newDoctorSchema", () => {
   const valid = {
     name: "Dr. Anita Rao",
-    department: "Cardiology",
+    department: "Cardiologist",
+    phone: "9876543210",
+    status: "available",
     fee: "250.50",
     revisitValidityDays: 7,
   };
@@ -25,9 +27,24 @@ describe("newDoctorSchema", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts an empty department (stored as NULL later)", () => {
-    const r = newDoctorSchema.safeParse({ ...valid, department: "" });
-    expect(r.success).toBe(true);
+  it("rejects an empty department (now a required dropdown)", () => {
+    expect(firstErrorPath({ ...valid, department: "" })).toBe("department");
+  });
+
+  it("rejects a department outside the fixed list", () => {
+    expect(firstErrorPath({ ...valid, department: "Made Up Dept" })).toBe("department");
+  });
+
+  it("rejects an empty phone (now required)", () => {
+    expect(firstErrorPath({ ...valid, phone: "" })).toBe("phone");
+  });
+
+  it("rejects a malformed phone", () => {
+    expect(firstErrorPath({ ...valid, phone: "123" })).toBe("phone");
+  });
+
+  it("rejects an unknown status", () => {
+    expect(firstErrorPath({ ...valid, status: "napping" })).toBe("status");
   });
 
   it("coerces a numeric-string validity to a number", () => {
@@ -60,7 +77,9 @@ describe("updateDoctorSchema", () => {
   it("requires a numeric-string id", () => {
     const base = {
       name: "Dr. X",
-      department: "",
+      department: "General Physician",
+      phone: "9876543210",
+      status: "available",
       fee: "300",
       revisitValidityDays: 0,
     };

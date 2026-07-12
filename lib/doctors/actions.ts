@@ -48,7 +48,9 @@ export async function createDoctorAction(
 
   const { id } = await createDoctor({
     name: v.name,
-    department: v.department || null,
+    department: v.department,
+    phone: v.phone,
+    status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
     location_id: locationId,
@@ -77,7 +79,9 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
   await updateDoctor({
     id: v.id,
     name: v.name,
-    department: v.department || null,
+    department: v.department,
+    phone: v.phone,
+    status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
   });

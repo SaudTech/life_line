@@ -35,6 +35,8 @@ const TYPE_LABELS: Record<BillType, string> = {
   consultation: "Consultation",
   procedure: "Procedure",
   ip: "IP",
+  advance: "Advance",
+  end_day: "End-of-day report",
 };
 
 // Server Actions for the admin receipt/report builder (plan §5). admin-only -

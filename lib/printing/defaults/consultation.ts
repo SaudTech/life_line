@@ -1,44 +1,24 @@
 import type { Template } from "@pdfme/common";
-import { A4_BASE_PDF, box, hLine, labeledField, staticText, textField } from "./build";
+import { LETTERHEAD_TOP_MM, box, hLine, labeledField, makeBasePdf, staticText, textField } from "./build";
 
 // Seed template for the `consultation` bill type (plan §4) - a working default
 // so printing works day one, before any admin ever opens the builder. An admin
 // can edit and save over this; "Reset to default" restores exactly this JSON.
 //
-// A4 usable area is x 10..200 (190mm wide), y 10..287. Layout, top to bottom:
-//   letterhead (name / tagline / address / phone) → rule → title band →
-//   bill meta (no/date/time) → boxed patient block → doctor + validity +
-//   reason → rule → payment + boxed totals → amount in words → footer.
+// LETTERHEAD-SAFE (plan §3): the paper is pre-printed with the hospital's colour
+// header, so this default reserves the top band (basePdf.padding[0] = 40mm) and
+// hard-codes NO hospital name/address/phone - content starts below the band. An
+// admin can still add a printed header for plain paper via the field palette.
+//
+// A4 usable area is x 10..200 (190mm wide). Layout, top to bottom (below band):
+//   title band → bill meta (no/date/time) → boxed patient block → doctor +
+//   validity + reason → rule → payment + boxed totals → amount in words → footer.
 export const CONSULTATION_DEFAULT_TEMPLATE = {
-  basePdf: A4_BASE_PDF,
+  basePdf: makeBasePdf({ width: 210, height: 297, topMm: LETTERHEAD_TOP_MM }),
   schemas: [
     [
-      // ── Letterhead ──────────────────────────────────────────────────────
-      textField("hospitalName", "Life Line", { x: 10, y: 11, w: 190, h: 10 }, {
-        fontSize: 24,
-        alignment: "center",
-        fontColor: "#0f172a",
-      }),
-      textField("hospitalTagline", "A MULTI SPECIALITY HOSPITAL", { x: 10, y: 22, w: 190, h: 4 }, {
-        fontSize: 8,
-        alignment: "center",
-        characterSpacing: 2,
-        fontColor: "#475569",
-      }),
-      textField("hospitalAddress", "Chandrayangutta 'X' Road, Hyderabad - 500 005", { x: 10, y: 27, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      textField("hospitalPhone", "Tel: 6309192617, 6309192618, 7382003300", { x: 10, y: 31, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      hLine(10, 38, 190, 0.6, "#0f172a"),
-
-      // Watermark hook (DUPLICATE / VOID), top-right, red.
-      textField("billStatusLabel", "", { x: 150, y: 11, w: 50, h: 8 }, {
+      // Watermark hook (DUPLICATE / VOID), right of the title band, red.
+      textField("billStatusLabel", "", { x: 150, y: 41, w: 50, h: 8 }, {
         fontSize: 13,
         alignment: "right",
         fontColor: "#c0392b",

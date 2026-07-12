@@ -69,10 +69,13 @@ export function ProceduresList({
   initial,
   creators,
   services,
+  printable,
 }: {
   initial: ProcedureBillListRow[];
   creators: Creator[];
   services: ServiceRow[];
+  // Server-resolved Print gate for this location's procedure design (§1c).
+  printable: boolean;
 }) {
   const router = useRouter();
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -318,6 +321,7 @@ export function ProceduresList({
                       <BillRowActions
                         isCancelled={isVoid}
                         replaced={!!b.replaced_by_number}
+                        printable={printable}
                         onPrint={() => printReceipt(b.id, b.bill_number, { copy: "duplicate" })}
                         onCancel={() =>
                           setVoidTarget({

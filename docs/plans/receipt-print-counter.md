@@ -24,6 +24,26 @@ natively, so this is the most reliable counter print path and needs no print-CSS
 
 ---
 
+## 0. Client update (call, 2026-07-12) — the print button is CONDITIONAL
+
+**A Print button shows ONLY when a valid, active design exists for that bill's type — and this is the
+default for every print, not a special case.** The client confirmed there is **no advance-payment
+receipt**; under this rule that needs no special handling — advance (and any undesigned type) simply
+has no active template, so no button. This REVISES §2b/§4 below and the "seed a default" assumption in
+the builder plan (`receipt-builder-admin.md` §0.2).
+
+- Add a cheap predicate `hasPrintableTemplate(type, locationId)` in `lib/printing/repository.ts`:
+  `getActiveTemplate` returns a row **and** its `schema_json` passes pdfme `checkTemplate` (and its
+  fields are valid for the type, per `lib/printing/fields.ts`). A malformed/absent template ⇒ **no
+  button**, never a broken PDF.
+- The **PDF route (§3)** enforces the same server-side: if there is no valid active template, return
+  **409** with a clear message (not a corrupt/empty PDF). The UI should have hidden the button, but
+  the route is the authority.
+- **Paper size + top offset are already in the template's `basePdf`** (builder §4), so `generate`
+  honours A4 / Half-A4 and the reserved letterhead band with no extra work here.
+
+---
+
 ## 2. Two small prerequisites in existing code
 
 ### 2a. Expose `billId` to the success screen (required)
@@ -74,8 +94,10 @@ handler + async `params` guidance in `node_modules/next/dist/docs/`). `export co
 ## 4. The Print button (counter UX)
 
 Both flows end in a shared `SuccessScreen` (`consultation-flow.tsx:220` /
-`procedure-flow.tsx:306`). Add a **primary "Print receipt" button** there (only when
-`outcome.billId != null`):
+`procedure-flow.tsx:306`). Add a **primary "Print receipt" button** there **only when BOTH**
+`outcome.billId != null` **and** a valid active template exists for the bill's type (§0 —
+`hasPrintableTemplate`, resolved server-side and passed into the success screen as a boolean flag;
+never trust the client to decide printability). No bill or no design ⇒ no button, silently:
 
 - **Behaviour:** open `/api/receipts/<billId>/pdf` in a **hidden `<iframe>`** and call
   `iframe.contentWindow.print()` on load (falls back to opening the URL in a new tab if the
@@ -117,7 +139,11 @@ document, no new server logic beyond honoring the query flag. Log `receipt.print
 ---
 
 ## 7. Definition of done
-- [ ] `billId` threaded into both outcomes; success screen shows **Print** only when a bill exists.
+- [ ] `billId` threaded into both outcomes; success screen shows **Print** only when a bill exists
+      **and** a valid active template exists for its type (§0); reprint actions gated the same way.
+- [ ] `hasPrintableTemplate(type, locationId)` in the repository; the PDF route returns **409** (not a
+      broken PDF) when no valid template exists; A4 / Half-A4 + top letterhead offset from the
+      template's `basePdf` are honoured by `generate`.
 - [ ] `GET /api/receipts/:billId/pdf` returns a valid A4 PDF for a **consultation** bill and a
       **procedure** bill (with its line-items table), auth-gated, Node runtime.
 - [ ] **₹ renders** correctly (bundled Unicode font); amounts + amount-in-words match the bill.

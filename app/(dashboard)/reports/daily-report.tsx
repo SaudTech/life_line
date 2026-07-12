@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { printEndDay } from "@/components/print-end-day";
 import { formatPaise } from "@/lib/money";
 import { addDays } from "@/lib/date-range";
 import { cn } from "@/lib/utils";
@@ -81,10 +82,15 @@ export function DailyReportView({
   initial,
   todayIso,
   staff,
+  printable,
 }: {
   initial: DailyReportResult;
   todayIso: string;
   staff: ReportableStaff[];
+  // Server-resolved: is there an active End-Day design to print through? When
+  // false, no Print button renders (print-updates plan §1c/§4c). The on-screen
+  // report stays for reading regardless.
+  printable: boolean;
 }) {
   const [dayIso, setDayIso] = useState(initial.meta.dayIso);
   // The report subject: "everyone" (hospital-wide) or a specific staff member's id.
@@ -144,12 +150,15 @@ export function DailyReportView({
   return (
     <div className="w-full">
       {/* Controls - not part of the printed sheet. Title left; date + filters right. */}
-      <div data-no-print className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Reports</h1>
+      <div data-no-print className="mb-5 flex flex-nowrap items-center justify-between gap-4">
+        <div className="shrink-0">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Daily report</h1>
+          <p className="mt-0.5 text-sm font-medium text-muted-foreground">
+            {everyone ? "Hospital-wide activity and collections" : isSelf ? "Your activity and collections" : `${subjectName}'s activity and collections`}
+          </p>
+        </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <span className="text-sm font-semibold text-foreground">{meta.dayLabel}</span>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
           {/* Subject picker - admin only (server still enforces who they may pick). */}
           {meta.canChooseSubject ? (
             <Combobox
@@ -198,11 +207,12 @@ export function DailyReportView({
           >
             Today
           </Button>
-          <Button type="button" size="sm" onClick={() => window.print()}>
-            <Printer className="size-4" aria-hidden />
-            Print
-          </Button>
-          </div>
+          {printable ? (
+            <Button type="button" size="sm" onClick={() => printEndDay(dayIso)}>
+              <Printer className="size-4" aria-hidden />
+              Print
+            </Button>
+          ) : null}
         </div>
       </div>
 

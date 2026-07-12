@@ -19,13 +19,15 @@ export interface PermissionMeta {
 }
 
 // ONE registry of grantable capabilities. `admin` implicitly has all of these.
+//
+// INTENTIONALLY EMPTY today: the only former grant (the old service-line modify
+// permission) was retired once procedure billing became a plain counter-ROLE
+// capability (op_desk / op_ip_desk / admin), not a per-user grant. The registry
+// shape is kept valid so a
+// real grantable capability can be re-added here the day one exists (e.g. a genuine
+// override: custom price, ad-hoc line, editing a finalized bill's lines).
 export const PERMISSIONS = {
-  "service_lines.modify": {
-    label: "Can modify service lines",
-    description:
-      "Add, edit and remove billed service lines on a patient's procedure bill.",
-  },
-  // add more here as features need them
+  // add grantable capabilities here as features need them
 } as const satisfies Record<string, PermissionMeta>;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

@@ -12,31 +12,36 @@ export interface DoctorListRow {
   id: string;
   name: string;
   department: string | null;
+  // Nullable at the DB level (migration 0016 added it without NOT NULL) even
+  // though new writes now require it (lib/doctors/schema.ts) - a doctor created
+  // before that requirement, or before this column existed, can still read back
+  // NULL until it's edited.
+  phone: string | null;
+  status: string;
   fee_paise: string;
   revisit_validity_days: number;
   active: boolean;
   created_at: Date;
 }
 
+const SELECT_COLUMNS =
+  "id, name, department, phone, status, fee_paise, revisit_validity_days, active, created_at";
+
 // All doctors (active AND inactive) - the client shows both. Ordered by name for
 // a stable, muscle-memory list.
 export async function listDoctors(): Promise<DoctorListRow[]> {
   const { rows } = await pool.query<DoctorListRow>(
-    `SELECT id, name, department, fee_paise, revisit_validity_days, active, created_at
-       FROM doctors
-      ORDER BY name ASC`,
+    `SELECT ${SELECT_COLUMNS} FROM doctors ORDER BY name ASC`,
   );
   return rows;
 }
 
-// Active doctors only, for pickers (a consultation can't be started against a
-// deactivated doctor). Ordered by name for a stable list.
+// Doctors assignable to a NEW consultation, for pickers: active (never
+// deactivated) AND on duty (status = 'available' - not on leave/unavailable
+// today). Ordered by name for a stable list.
 export async function listActiveDoctors(): Promise<DoctorListRow[]> {
   const { rows } = await pool.query<DoctorListRow>(
-    `SELECT id, name, department, fee_paise, revisit_validity_days, active, created_at
-       FROM doctors
-      WHERE active
-      ORDER BY name ASC`,
+    `SELECT ${SELECT_COLUMNS} FROM doctors WHERE active AND status = 'available' ORDER BY name ASC`,
   );
   return rows;
 }
@@ -46,9 +51,7 @@ export async function listActiveDoctors(): Promise<DoctorListRow[]> {
 // id doesn't exist.
 export async function getDoctorById(id: string): Promise<DoctorListRow | null> {
   const { rows } = await pool.query<DoctorListRow>(
-    `SELECT id, name, department, fee_paise, revisit_validity_days, active, created_at
-       FROM doctors
-      WHERE id = $1`,
+    `SELECT ${SELECT_COLUMNS} FROM doctors WHERE id = $1`,
     [id],
   );
   return rows[0] ?? null;
@@ -56,7 +59,9 @@ export async function getDoctorById(id: string): Promise<DoctorListRow | null> {
 
 export interface CreateDoctorInput {
   name: string;
-  department: string | null;
+  department: string;
+  phone: string;
+  status: string;
   fee_paise: number; // integer paise, converted by the action
   revisit_validity_days: number;
   location_id: string; // bigint returned by pg as string
@@ -66,12 +71,14 @@ export async function createDoctor(
   input: CreateDoctorInput,
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO doctors (name, department, fee_paise, revisit_validity_days, location_id)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO doctors (name, department, phone, status, fee_paise, revisit_validity_days, location_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
     [
       input.name,
       input.department,
+      input.phone,
+      input.status,
       input.fee_paise,
       input.revisit_validity_days,
       input.location_id,
@@ -83,7 +90,9 @@ export async function createDoctor(
 export interface UpdateDoctorInput {
   id: string;
   name: string;
-  department: string | null;
+  department: string;
+  phone: string;
+  status: string;
   fee_paise: number;
   revisit_validity_days: number;
 }
@@ -92,12 +101,14 @@ export interface UpdateDoctorInput {
 export async function updateDoctor(input: UpdateDoctorInput): Promise<void> {
   await pool.query(
     `UPDATE doctors
-        SET name = $2, department = $3, fee_paise = $4, revisit_validity_days = $5
+        SET name = $2, department = $3, phone = $4, status = $5, fee_paise = $6, revisit_validity_days = $7
       WHERE id = $1`,
     [
       input.id,
       input.name,
       input.department,
+      input.phone,
+      input.status,
       input.fee_paise,
       input.revisit_validity_days,
     ],

@@ -199,13 +199,13 @@ export function ChartCard({
   className?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
+    <div className={cn("flex h-full flex-col overflow-hidden rounded-xl border bg-card", className)}>
       <div className="border-b bg-muted/40 px-4 py-2.5">
         <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{caption}</span>
       </div>
-      <div className="p-4">{children}</div>
+      <div className="flex-1 p-4">{children}</div>
       {footerLabel != null ? (
-        <div className="flex items-center justify-between border-t bg-muted/30 px-4 py-2.5">
+        <div className="mt-auto flex items-center justify-between border-t bg-muted/30 px-4 py-2.5">
           <span className="text-xs font-bold text-foreground">{footerLabel}</span>
           <span className="text-sm font-bold tabular-nums text-foreground">{footerValue}</span>
         </div>

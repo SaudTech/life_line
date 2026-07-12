@@ -42,7 +42,7 @@ export interface ReportMeta {
   // can actually produce (a report on an OP desk never shows IP or approvals). For
   // the whole-hospital view every capability is on (all roles are in the mix).
   canApprove: boolean; // subject can approve discounts (supervisor / admin)
-  canAdmit: boolean; // subject can admit → take advance deposits (op_ip_desk / admin)
+  canAdmit: boolean; // subject can admit → take advance deposits (op_ip_desk / supervisor / admin)
   allowedBillTypes: BillTypeValue[]; // the bill types this subject can bill
   dayIso: string; // the clinic day reported on, 'YYYY-MM-DD'
   dayLabel: string; // human-readable, e.g. "Saturday, 11 July 2026"
@@ -54,8 +54,15 @@ export interface ReportMeta {
 // are outpatient work every billing role does. A null role means the whole-hospital
 // view - every type is in play.
 function allowedBillTypesFor(role: string | null): BillTypeValue[] {
-  if (role === null || role === "admin" || role === "op_ip_desk") return [...BILL_TYPES];
-  // op_desk / supervisor: outpatient only, no in-patient bills.
+  if (
+    role === null ||
+    role === "admin" ||
+    role === "op_ip_desk" ||
+    role === "supervisor"
+  ) {
+    return [...BILL_TYPES];
+  }
+  // op_desk: outpatient only, no in-patient bills.
   return BILL_TYPES.filter((t) => t !== "ip");
 }
 
@@ -64,9 +71,15 @@ function canApproveFor(role: string | null): boolean {
   return role === null || role === "supervisor" || role === "admin";
 }
 
-// Admitting (and thus taking an advance deposit) is limited to the IP roles.
+// Admitting (and thus taking an advance deposit) is limited to the IP roles
+// (mirrors IP_ROLES in lib/admissions/actions.ts): op_ip_desk, supervisor, admin.
 function canAdmitFor(role: string | null): boolean {
-  return role === null || role === "admin" || role === "op_ip_desk";
+  return (
+    role === null ||
+    role === "admin" ||
+    role === "op_ip_desk" ||
+    role === "supervisor"
+  );
 }
 
 export interface DailyReportResult {

@@ -25,18 +25,23 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/consultations", label: "OPD" },
     { href: "/procedures", label: "Procedures" },
     { href: "/admissions", label: "IPD" },
-    { href: "#", label: "Billing", disabled: true },
     { href: "/reports", label: "Reports" },
-    { href: "/admin/receipts", label: "Receipts" },
+    { href: "/admin/receipts", label: "Receipt Designs" },
   ],
+  // Supervisors approve discounts/voids inline (PIN) AND work the full counter -
+  // OP consultations, procedures and IP admit/discharge, same as op_ip_desk. Each
+  // page re-checks the role server-side (dev-rules §8).
   supervisor: [
     { href: "/supervisor", label: "Dashboard" },
+    { href: "/consultations", label: "OPD" },
+    { href: "/procedures", label: "Procedures" },
+    { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "My Day" },
   ],
-  // OP-only desk does outpatient billing but not consultations intake here. The
-  // Procedures link is always shown - service_lines.modify is a PER-USER grant
-  // (plan §Part2), so a desk role may or may not actually be able to use it; the
-  // page/action itself is what enforces the permission (dev-rules §8).
+  // OP-only desk does outpatient billing but not consultations intake here.
+  // Procedures is a plain counter-ROLE capability (op_desk / op_ip_desk / admin):
+  // billing from the catalogue is the desk's job, so the link always applies to
+  // op_desk. The page/action re-checks the role server-side (dev-rules §8).
   op_desk: [
     { href: "/desk", label: "Counter" },
     { href: "/procedures", label: "Procedures" },

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // the currently-admitted list and recent discharges; the client switches between
 // them and links into each admission's detail.
 export default async function AdmissionsPage() {
-  await requireRole(["admin", "op_ip_desk"]);
+  await requireRole(["admin", "op_ip_desk", "supervisor"]);
   const [admitted, discharged] = await Promise.all([
     listAdmissions("admitted"),
     listAdmissions("discharged"),

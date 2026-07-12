@@ -39,11 +39,14 @@ import { PreviewDialog } from "./preview-dialog";
 // route, so the list refreshes itself. Uses the User-Management design system
 // (page header, cards, semantic tokens, light-only) - matches admin/users.
 
-// All three bill types ship now, including IP (in-patient discharge, plan §6b).
+// Every designable type ships a default. End-Day is a first-class designable
+// report template printed through the same pipeline (print-updates plan §4);
+// `advance` is intentionally absent - it ships no default/catalog (plan §5).
 const SECTIONS: { type: BillType; label: string; disabled?: boolean }[] = [
   { type: "consultation", label: "Consultation" },
   { type: "procedure", label: "Procedure" },
   { type: "ip", label: "IP" },
+  { type: "end_day", label: "End-of-day report" },
 ];
 
 type RenameState = { id: string; name: string } | null;

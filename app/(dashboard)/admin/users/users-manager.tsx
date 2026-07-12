@@ -2,16 +2,18 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowLeft, Search, X } from "lucide-react";
+import { Plus, ArrowLeft, Search, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { cn } from "@/lib/utils";
 import { ROLES, ROLE_LABELS, type Role } from "@/lib/users/schema";
 import { setActiveAction } from "@/lib/users/actions";
 import type { UserListRow } from "@/lib/users/repository";
 import { UserCard } from "./user-card";
+import { UserRow } from "./user-row";
 import { EmptyTrashIllustration } from "./empty-trash-illustration";
 import {
   UserFormDialog,
@@ -45,6 +47,7 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [layout, setLayout] = useState<"card" | "list">("card");
 
   const q = search.trim().toLowerCase();
   const filtersActive = q !== "" || roleFilter !== "all" || statusFilter !== "all";
@@ -155,6 +158,34 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
           searchPlaceholder="Search status…"
           className="min-w-[140px] sm:w-auto"
         />
+
+        {/* Card / list layout toggle. */}
+        <div className="flex h-9 items-center gap-0.5 rounded-lg border bg-white p-1">
+          <button
+            type="button"
+            aria-label="Card view"
+            aria-pressed={layout === "card"}
+            onClick={() => setLayout("card")}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              layout === "card" && "bg-accent text-accent-foreground",
+            )}
+          >
+            <LayoutGrid className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label="List view"
+            aria-pressed={layout === "list"}
+            onClick={() => setLayout("list")}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              layout === "list" && "bg-accent text-accent-foreground",
+            )}
+          >
+            <List className="size-4" aria-hidden />
+          </button>
+        </div>
       </div>
 
       {/* Meta row */}
@@ -174,21 +205,37 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
         ) : null}
       </div>
 
-      {/* Grid or empty state */}
+      {/* Grid, list, or empty state */}
       {visible.length > 0 ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(288px,1fr))] gap-3.5">
-          {visible.map((u) => (
-            <UserCard
-              key={u.id}
-              user={u}
-              statusPending={pendingId === u.id}
-              onEdit={() => open("edit", u.id)}
-              onReset={() => open("reset", u.id)}
-              onPin={() => open("pin", u.id)}
-              onStatus={() => (u.active ? open("deactivate", u.id) : reactivate(u))}
-            />
-          ))}
-        </div>
+        layout === "card" ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(288px,1fr))] gap-3.5">
+            {visible.map((u) => (
+              <UserCard
+                key={u.id}
+                user={u}
+                statusPending={pendingId === u.id}
+                onEdit={() => open("edit", u.id)}
+                onReset={() => open("reset", u.id)}
+                onPin={() => open("pin", u.id)}
+                onStatus={() => (u.active ? open("deactivate", u.id) : reactivate(u))}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="divide-y overflow-hidden rounded-md border">
+            {visible.map((u) => (
+              <UserRow
+                key={u.id}
+                user={u}
+                statusPending={pendingId === u.id}
+                onEdit={() => open("edit", u.id)}
+                onReset={() => open("reset", u.id)}
+                onPin={() => open("pin", u.id)}
+                onStatus={() => (u.active ? open("deactivate", u.id) : reactivate(u))}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card/40 px-6 py-14 text-center">
           <EmptyTrashIllustration className="size-24" />

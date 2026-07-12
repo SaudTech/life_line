@@ -47,7 +47,14 @@ function defaultFilters(): Filters {
 // every filter below (free text, or a date range) re-queries the server on
 // demand, debounced - the server is the one source of truth for what matches,
 // never a client-side re-filter of a fixed page of rows.
-export function ConsultationsList({ initial }: { initial: ConsultationListRow[] }) {
+export function ConsultationsList({
+  initial,
+  printable,
+}: {
+  initial: ConsultationListRow[];
+  // Server-resolved Print gate for this location's consultation design (§1c).
+  printable: boolean;
+}) {
   const router = useRouter();
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [rows, setRows] = useState<ConsultationListRow[]>(initial);
@@ -231,6 +238,7 @@ export function ConsultationsList({ initial }: { initial: ConsultationListRow[] 
                         <BillRowActions
                           isCancelled={isVoid}
                           replaced={!!c.replaced_by_number}
+                          printable={printable}
                           onPrint={() =>
                             printReceipt(c.bill_id!, c.bill_number!, { copy: "duplicate" })
                           }

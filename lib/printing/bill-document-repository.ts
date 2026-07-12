@@ -3,7 +3,7 @@ import {
   buildConsultationDocument,
   buildProcedureDocument,
   buildIpDocument,
-  type AnyBillDocument,
+  type BillDocumentUnion,
   type BillDocumentCore,
 } from "./bill-document";
 
@@ -77,7 +77,7 @@ const CORE_QUERY = `
 // Full render model for a saved bill, by id. Throws if the bill doesn't exist
 // or its type isn't shipped yet (`ip`) - the caller (builder preview / the
 // later print step) is expected to have already confirmed the bill exists.
-export async function getBillDocument(billId: string): Promise<AnyBillDocument> {
+export async function getBillDocument(billId: string): Promise<BillDocumentUnion> {
   const { rows } = await pool.query<CoreRow>(CORE_QUERY, [billId]);
   const core = rows[0];
   if (!core) {

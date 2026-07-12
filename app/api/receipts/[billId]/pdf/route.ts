@@ -30,8 +30,15 @@ export async function GET(
 
   // The bill's OWN location picks the template, not the viewer's (multi-branch
   // ready) - a supervisor at branch A reprinting a branch B bill still gets
-  // branch B's layout.
-  const tpl = await getActiveTemplate(doc.type, doc.locationId);
+  // branch B's layout. getActiveTemplate throws for a type with no active row AND
+  // no default; return 409 (not a broken/empty PDF) so this route stays the
+  // authority even if a Print button ever leaks through (print-updates plan §1b).
+  let tpl;
+  try {
+    tpl = await getActiveTemplate(doc.type, doc.locationId);
+  } catch {
+    return new NextResponse("No receipt design for this document type.", { status: 409 });
+  }
 
   // Watermark: read live from the bill's current status, plus the `copy` query
   // flag reprints pass - never stored, never mutates anything (print plan §3.6).

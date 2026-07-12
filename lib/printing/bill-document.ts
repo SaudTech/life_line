@@ -55,7 +55,50 @@ export type IpBillDocument = BillDocument & {
   balanceText: string;
 };
 
-export type AnyBillDocument = ConsultationBillDocument | ProcedureBillDocument | IpBillDocument;
+// The End-Day report render model (plan §4b). NOT a bill - it has no patient or
+// payment; it is the day's close-out figures, ALREADY formatted to strings. All
+// money math stays in the tested pure shaper (lib/reports/summary.ts); the
+// resolver that builds this (lib/printing/end-day-document.ts) only reads those
+// numbers and formats them (formatPaise), never sums or computes. Its keys line
+// up 1:1 with the `end_day` field catalog (lib/printing/fields.ts).
+export interface EndDayDocument {
+  type: "end_day";
+  // Not a template field - carried so the print route picks the right location's
+  // active template (mirrors BillDocument.locationId).
+  locationId: string;
+  hospitalName: string;
+  reportDateText: string; // the clinic day, e.g. "Saturday, 11 July 2026"
+  staffNameRole: string; // "Meera · OP Desk" - whose day this is
+  generatedAtText: string; // when the sheet was produced (clinic tz)
+  grandTotalText: string; // total collected (excludes voids)
+  billsCountText: string; // number of collected bills
+  cashTotalText: string;
+  cardTotalText: string;
+  upiTotalText: string;
+  otherTotalText: string;
+  discountsText: string; // discount value given on the day's bills
+  discountsApprovedText: string; // "450.00 (2)" - discounts I APPROVED (amount + count), a supervisor's own tally
+  voidsText: string; // "1,200.00 (2)" - voided amount + count
+  advancesText: string; // admission deposits collected
+  advancesCountText: string; // "3" - number of advances taken (pairs with advancesText's amount)
+  activityTotalText: string; // "19" - total logged actions on the day
+  // Repeating rows for the designer's `table` fields (mode / type / activity).
+  modeRows: { mode: string; count: string; amountText: string }[];
+  typeRows: { label: string; count: string; amountText: string }[];
+  activityRows: { label: string; count: string }[];
+}
+
+// The bill documents (a real bill, with hospital/patient/payment blocks) - the
+// return of getBillDocument. Kept separate from AnyBillDocument so bill-only
+// consumers (the [billId] PDF route) still see `.bill`/`.hospital`.
+export type BillDocumentUnion =
+  | ConsultationBillDocument
+  | ProcedureBillDocument
+  | IpBillDocument;
+
+// Every document a receipt/report template can be fed - bills plus the End-Day
+// report. billDocumentToInputs branches on `type` to shape each.
+export type AnyBillDocument = BillDocumentUnion | EndDayDocument;
 
 const PAYMENT_MODE_LABELS: Record<string, string> = {
   cash: "Cash",

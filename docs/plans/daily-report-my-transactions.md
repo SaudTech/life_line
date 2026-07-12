@@ -107,9 +107,21 @@ copy is self-describing for handover.
     homes (and op_ip_desk).
   - **Admin home** — the **same** self report surfaced here (the `admin/page.tsx` quick-actions has
     a disabled "View reports" stub — wire it to this). Admin runs it for their own actions for now.
-- **Print:** a **print-friendly layout** (browser `window.print()` + a small print stylesheet — an
-  internal tabular handover sheet, so no pdfme/template needed here, unlike customer receipts).
-  Header (§3C) + the tables print cleanly on A4.
+- **Print (REVISED 2026-07-12 — client call):** the End-Day report is a **designable pdfme template**,
+  the `end_day` type in the receipt builder (`docs/plans/receipt-builder-admin.md` §0), **not** a
+  browser-CSS sheet. This gives it the same admin-designed layout, custom paper size, and reserved
+  top letterhead band as the other receipts, and the same **conditional Print button** (shown only
+  when a valid active `end_day` template exists — builder §0.2 / counter §0). To wire it:
+  - Add `end_day` to the printing **field catalog** (`lib/printing/fields.ts`) — the report's numbers
+    (per-mode totals, per-type totals, discounts, voids, advances, grand total, header §3C), and,
+    for the repeating rows (payment modes / bill types / activity lines), a pdfme **`table`** field.
+  - Extend the render model: a `getEndDayDocument(userId, day)` resolver (parallel to
+    `getBillDocument`) that shapes the **already server-computed** `lib/reports/summary.ts` output
+    into the catalog's field keys — **no money math in the resolver or template** (it only formats).
+  - The report page's Print button calls the same PDF route family (a `GET` that renders the active
+    `end_day` template with these inputs). Reuse the counter plan's `hasPrintableTemplate` gate.
+  - **Screen view stays** the redesigned on-screen report (§5 above) for reading; **print** goes
+    through the template. If no `end_day` design exists yet, no Print button (honest, per the rule).
 
 ## 6. Roles / security (strictly self-scoped)
 - The action **always reports on `session.sub`** — there is **no `userId` input**; a user can
@@ -143,7 +155,8 @@ existing homes + the admin quick-action stub.
       excluded, mixed-mode, day-boundary cases); the UI renders, never calculates.
 - [ ] Reachable from the **staff homes** and the **admin home** (the "View reports" stub wired up);
       **strictly self-scoped** — no `userId` input, server forces `session.sub`.
-- [ ] Printable handover sheet (browser print + print CSS), header self-describing.
+- [ ] Printable via the **`end_day` pdfme template** (receipt builder), gated by `hasPrintableTemplate`
+      (no design ⇒ no Print button); `getEndDayDocument` only formats the server-computed summary.
 - [ ] `admissions.created_by` + `advance_payment_mode` migration added; the admit action sets both;
       the report attributes + payment-splits advance deposits (shown separately from bill revenue).
 - [ ] `npm test`, `npx tsc --noEmit`, `npx next build` clean. Light theme, dialogs primary-left /

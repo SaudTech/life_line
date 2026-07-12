@@ -1,4 +1,4 @@
-import type { AnyBillDocument, BillDocument } from "./bill-document";
+import type { AnyBillDocument, BillDocument, EndDayDocument } from "./bill-document";
 
 // The field catalog - single source of truth for every field a receipt
 // template may bind to (plan §3d). Three things read this ONE registry so they
@@ -10,7 +10,12 @@ import type { AnyBillDocument, BillDocument } from "./bill-document";
 //      that's what the pdfme template's field `name`s bind to.
 // PURE and client-safe - no DB, no React.
 
-export type BillType = "consultation" | "procedure" | "ip";
+// `advance` and `end_day` join the three bill types (plan §4a). `end_day` is a
+// fully designable report template (catalog + default below); `advance` exists
+// only so the print-button gate (hasPrintableTemplate) can treat it uniformly -
+// it ships NO default and NO catalog entry, so it stays button-less until an
+// owner asks for it (plan §5).
+export type BillType = "consultation" | "procedure" | "ip" | "advance" | "end_day";
 
 // How a field is rendered on the page:
 //   - "labeled": the common case - a pdfme `multiVariableText` field whose
@@ -106,15 +111,46 @@ const IP_FIELDS: FieldMeta[] = [
   labeled("balanceText", "Payable balance", "-500.00"),
 ];
 
-const FIELDS_BY_TYPE: Record<BillType, FieldMeta[]> = {
+// End-Day report fields (plan §4a). This is a report, not a bill, so it shares
+// NONE of COMMON_FIELDS' bill/patient/payment keys - only its own close-out
+// figures, plus a `hospitalName` heading for plain-paper prints. The three
+// `table` fields carry the repeating rows. Keys line up 1:1 with EndDayDocument
+// (bill-document.ts) and endDayDocumentToInputs below.
+const END_DAY_FIELDS: FieldMeta[] = [
+  { key: "hospitalName", label: "Hospital name", sample: "Life Line", kind: "plain" },
+  labeled("reportDateText", "Report date", "Saturday, 11 July 2026", "Date"),
+  labeled("staffNameRole", "Staff (name + role)", "Meera · OP Desk", "Staff"),
+  labeled("generatedAtText", "Generated at", "11 Jul 2026, 5:30 PM", "Generated"),
+  labeled("grandTotalText", "Total collected", "12,450.00", "Total collected"),
+  labeled("billsCountText", "Bills collected", "18", "Bills"),
+  labeled("cashTotalText", "Cash total", "7,200.00", "Cash"),
+  labeled("cardTotalText", "Card total", "2,300.00", "Card"),
+  labeled("upiTotalText", "UPI total", "2,950.00", "UPI"),
+  labeled("otherTotalText", "Other total", "0.00", "Other"),
+  labeled("discountsText", "Discounts given", "450.00", "Discounts"),
+  labeled("discountsApprovedText", "Discounts approved (amount + count)", "600.00 (2)", "Approved"),
+  labeled("voidsText", "Voids (amount + count)", "1,200.00 (2)", "Voids"),
+  labeled("advancesText", "Admission advances", "5,000.00", "Advances"),
+  labeled("advancesCountText", "Advances count", "1", "Advances count"),
+  labeled("activityTotalText", "Total actions", "19", "Actions"),
+  { key: "modeTable", label: "By payment mode (table)", sample: "", kind: "table" },
+  { key: "typeTable", label: "By bill type (table)", sample: "", kind: "table" },
+  { key: "activityTable", label: "Activity (table)", sample: "", kind: "table" },
+];
+
+// `advance` and `end_day` are part of BillType, but only `end_day` has a palette:
+// advance ships no catalog (plan §5), so it maps to no entry here.
+const FIELDS_BY_TYPE: Partial<Record<BillType, FieldMeta[]>> = {
   consultation: [...COMMON_FIELDS, ...CONSULTATION_FIELDS],
   procedure: [...COMMON_FIELDS, ...PROCEDURE_FIELDS],
   ip: [...COMMON_FIELDS, ...IP_FIELDS],
+  end_day: END_DAY_FIELDS,
 };
 
-// The palette for a given bill type - COMMON fields plus that type's own.
+// The palette for a given bill type - COMMON fields plus that type's own. A type
+// with no catalog (advance) has an empty palette rather than crashing.
 export function fieldsForType(type: BillType): FieldMeta[] {
-  return FIELDS_BY_TYPE[type];
+  return FIELDS_BY_TYPE[type] ?? [];
 }
 
 export function fieldKeysForType(type: BillType): string[] {
@@ -131,10 +167,13 @@ export function isKnownField(type: BillType, key: string): boolean {
 // insert. Falls back to "labeled" (the common case) for an unknown key; the
 // value is discarded anyway since it's outside every catalog.
 const KIND_BY_KEY: Record<string, FieldKind> = Object.fromEntries(
-  [...COMMON_FIELDS, ...CONSULTATION_FIELDS, ...PROCEDURE_FIELDS, ...IP_FIELDS].map((f) => [
-    f.key,
-    f.kind,
-  ]),
+  [
+    ...COMMON_FIELDS,
+    ...CONSULTATION_FIELDS,
+    ...PROCEDURE_FIELDS,
+    ...IP_FIELDS,
+    ...END_DAY_FIELDS,
+  ].map((f) => [f.key, f.kind]),
 );
 
 export function fieldKind(key: string): FieldKind {
@@ -145,10 +184,13 @@ export function fieldKind(key: string): FieldKind {
 // baked into a seeded labeled field's "<Label>: {key}" text
 // (lib/printing/defaults/build.ts's labeledField). Kept concise for paper.
 const PRINT_LABEL_BY_KEY: Record<string, string> = Object.fromEntries(
-  [...COMMON_FIELDS, ...CONSULTATION_FIELDS, ...PROCEDURE_FIELDS, ...IP_FIELDS].map((f) => [
-    f.key,
-    f.printLabel ?? f.label,
-  ]),
+  [
+    ...COMMON_FIELDS,
+    ...CONSULTATION_FIELDS,
+    ...PROCEDURE_FIELDS,
+    ...IP_FIELDS,
+    ...END_DAY_FIELDS,
+  ].map((f) => [f.key, f.printLabel ?? f.label]),
 );
 
 export function labelFor(key: string): string {
@@ -158,8 +200,49 @@ export function labelFor(key: string): string {
 // Fixed fake data per type, for the builder's "Preview" button - a realistic
 // receipt with no real bill/patient involved (plan §3d).
 export function sampleBillDocument(type: BillType): AnyBillDocument {
+  if (type === "end_day") {
+    return {
+      type: "end_day",
+      locationId: "0", // sample data only - never a real location
+      hospitalName: "Life Line",
+      reportDateText: "Saturday, 11 July 2026",
+      staffNameRole: "Meera · OP Desk",
+      generatedAtText: "11 Jul 2026, 5:30 PM",
+      grandTotalText: "12,450.00",
+      billsCountText: "18",
+      cashTotalText: "7,200.00",
+      cardTotalText: "2,300.00",
+      upiTotalText: "2,950.00",
+      otherTotalText: "0.00",
+      discountsText: "450.00",
+      discountsApprovedText: "600.00 (2)",
+      voidsText: "1,200.00 (2)",
+      advancesText: "5,000.00",
+      advancesCountText: "1",
+      activityTotalText: "19",
+      modeRows: [
+        { mode: "Cash", count: "11", amountText: "7,200.00" },
+        { mode: "Card", count: "3", amountText: "2,300.00" },
+        { mode: "UPI", count: "4", amountText: "2,950.00" },
+        { mode: "Other", count: "0", amountText: "0.00" },
+      ],
+      typeRows: [
+        { label: "Consultation", count: "12", amountText: "6,000.00" },
+        { label: "Procedure", count: "5", amountText: "4,450.00" },
+        { label: "In-patient", count: "1", amountText: "2,000.00" },
+      ],
+      activityRows: [
+        { label: "Patients registered", count: "4" },
+        { label: "Consultations", count: "12" },
+        { label: "Free revisits", count: "3" },
+      ],
+    };
+  }
+
   const common: BillDocument = {
-    type,
+    // end_day is handled above; the remaining sampled types are all bill types.
+    // (advance ships no sample - it simply falls through to the ip shape, unused.)
+    type: type as BillDocument["type"],
     locationId: "0", // sample data only - never a real location
     hospital: {
       name: "Life Line",
@@ -231,7 +314,43 @@ function wire(key: string, value: string): string {
   return fieldKind(key) === "labeled" ? JSON.stringify({ [key]: value }) : value;
 }
 
+// The raw (pre-wire) string map for the End-Day report - keyed by exactly the
+// end_day catalog keys. The three tables are JSON 2D arrays (like items/expenses).
+function endDayRaw(doc: EndDayDocument): Record<string, string> {
+  return {
+    hospitalName: doc.hospitalName,
+    reportDateText: doc.reportDateText,
+    staffNameRole: doc.staffNameRole,
+    generatedAtText: doc.generatedAtText,
+    grandTotalText: doc.grandTotalText,
+    billsCountText: doc.billsCountText,
+    cashTotalText: doc.cashTotalText,
+    cardTotalText: doc.cardTotalText,
+    upiTotalText: doc.upiTotalText,
+    otherTotalText: doc.otherTotalText,
+    discountsText: doc.discountsText,
+    discountsApprovedText: doc.discountsApprovedText,
+    voidsText: doc.voidsText,
+    advancesText: doc.advancesText,
+    advancesCountText: doc.advancesCountText,
+    activityTotalText: doc.activityTotalText,
+    modeTable: JSON.stringify(doc.modeRows.map((r) => [r.mode, r.count, r.amountText])),
+    typeTable: JSON.stringify(doc.typeRows.map((r) => [r.label, r.count, r.amountText])),
+    activityTable: JSON.stringify(doc.activityRows.map((r) => [r.label, r.count])),
+  };
+}
+
 export function billDocumentToInputs(doc: AnyBillDocument): Record<string, string> {
+  // End-Day is a report, not a bill (no hospital/patient/payment blocks) - build
+  // its raw map separately, then run the SAME kind-driven wire pass below.
+  if (doc.type === "end_day") {
+    const inputs: Record<string, string> = {};
+    for (const [key, value] of Object.entries(endDayRaw(doc))) {
+      inputs[key] = fieldKind(key) === "table" ? value : wire(key, value);
+    }
+    return inputs;
+  }
+
   const raw: Record<string, string> = {
     hospitalName: doc.hospital.name,
     hospitalTagline: doc.hospital.tagline ?? "",

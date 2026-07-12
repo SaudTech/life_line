@@ -40,15 +40,15 @@ import {
   type AdmissionExpenseRow,
 } from "./repository";
 
-// Server actions for the in-patient admit → discharge flow (plan §5/§6). Only the
-// OP+IP desk and admin may admit/discharge (PROJECT_OVERVIEW §Roles) - gated on the
-// SERVER in EVERY action via IP_ROLES; op_desk is blocked even if the UI leaks
-// (dev-rules §8). Money is server-authoritative throughout: expenses are re-priced
-// from the live catalog on every add, and the discharge balance is computed by the
-// pure rule calculateDischargeBalance - the client only ever shows what the server
-// returns (no client-side money formula, dev-rules §4).
+// Server actions for the in-patient admit → discharge flow (plan §5/§6). The OP+IP
+// desk, admin, and supervisors (who work the full counter) may admit/discharge -
+// gated on the SERVER in EVERY action via IP_ROLES; op_desk is blocked even if the
+// UI leaks (dev-rules §8). Money is server-authoritative throughout: expenses are
+// re-priced from the live catalog on every add, and the discharge balance is
+// computed by the pure rule calculateDischargeBalance - the client only ever shows
+// what the server returns (no client-side money formula, dev-rules §4).
 
-const IP_ROLES = ["admin", "op_ip_desk"] as const;
+const IP_ROLES = ["admin", "op_ip_desk", "supervisor"] as const;
 const PANEL_PATH = "/admissions";
 
 // ── Patient lookup (reused from the consultation/procedure intake) ────────────

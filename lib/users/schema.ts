@@ -51,10 +51,14 @@ const pin = z.string().regex(/^\d{4,6}$/, "PIN must be 4-6 digits.");
 // Granular permissions (plan 1B). Each entry must be a KEY from the typed registry
 // (lib/permissions.ts) - the server rejects any key not in the registry (plan
 // B-4), so the client checkbox list can never smuggle in an unknown capability.
-// The cast gives z.enum the non-empty-tuple type it wants from the registry array.
-const permissions = z
-  .array(z.enum(PERMISSION_KEYS as [string, ...string[]]))
-  .default([]);
+// The registry is intentionally EMPTY today (no grantable capability yet), and
+// z.enum can't take an empty tuple - so guard it: no keys ⇒ only an empty grant
+// list validates (any stray key is rejected). Re-add the z.enum branch the day a
+// real permission returns.
+const permissions =
+  PERMISSION_KEYS.length > 0
+    ? z.array(z.enum(PERMISSION_KEYS as unknown as [string, ...string[]])).default([])
+    : z.array(z.never()).default([]);
 
 export const newUserSchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(100),

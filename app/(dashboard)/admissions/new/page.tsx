@@ -10,6 +10,6 @@ export const metadata: Metadata = {
 // and admin; the flow itself runs through server actions that re-gate the same
 // roles.
 export default async function AdmitPage() {
-  await requireRole(["admin", "op_ip_desk"]);
+  await requireRole(["admin", "op_ip_desk", "supervisor"]);
   return <AdmitFlow />;
 }

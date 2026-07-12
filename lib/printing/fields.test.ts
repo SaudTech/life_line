@@ -9,7 +9,9 @@ import {
   type BillType,
 } from "./fields";
 
-const TYPES: BillType[] = ["consultation", "procedure", "ip"];
+// `end_day` is a designable report template (print-updates plan §4); `advance`
+// has no catalog/sample, so it isn't exercised here.
+const TYPES: BillType[] = ["consultation", "procedure", "ip", "end_day"];
 
 describe("fields catalog / resolver output stay in sync", () => {
   it.each(TYPES)(
@@ -20,6 +22,29 @@ describe("fields catalog / resolver output stay in sync", () => {
       expect(Object.keys(inputs).sort()).toEqual(fieldKeysForType(type).sort());
     },
   );
+});
+
+describe("end_day report inputs", () => {
+  it("encodes the three End-Day tables as JSON 2D arrays for pdfme table fields", () => {
+    const doc = sampleBillDocument("end_day");
+    if (doc.type !== "end_day") throw new Error("expected an end_day document");
+    const inputs = billDocumentToInputs(doc);
+    expect(fieldKind("modeTable")).toBe("table");
+    expect(fieldKind("typeTable")).toBe("table");
+    expect(fieldKind("activityTable")).toBe("table");
+    expect(JSON.parse(inputs.modeTable)[0]).toEqual(["Cash", "11", "7,200.00"]);
+    expect(JSON.parse(inputs.typeTable)[0]).toEqual(["Consultation", "12", "6,000.00"]);
+    expect(JSON.parse(inputs.activityTable)[0]).toEqual(["Patients registered", "4"]);
+  });
+
+  it("wraps a labeled figure as multiVariableText JSON and leaves hospitalName plain", () => {
+    const doc = sampleBillDocument("end_day");
+    const inputs = billDocumentToInputs(doc);
+    expect(fieldKind("grandTotalText")).toBe("labeled");
+    expect(JSON.parse(inputs.grandTotalText)).toEqual({ grandTotalText: "12,450.00" });
+    expect(fieldKind("hospitalName")).toBe("plain");
+    expect(inputs.hospitalName).toBe("Life Line");
+  });
 });
 
 describe("isKnownField", () => {
@@ -66,6 +91,7 @@ describe("billDocumentToInputs labeled/plain wire shapes", () => {
 
   it("leaves a plain field's value as a raw string (no label, no JSON wrap)", () => {
     const doc = sampleBillDocument("consultation");
+    if (doc.type !== "consultation") throw new Error("expected a consultation document");
     const inputs = billDocumentToInputs(doc);
     expect(fieldKind("hospitalName")).toBe("plain");
     expect(inputs.hospitalName).toBe(doc.hospital.name);

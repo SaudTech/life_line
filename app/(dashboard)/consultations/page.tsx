@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth/dal";
 import { listActiveDoctors } from "@/lib/doctors/repository";
 import { getBillForReissue, type ReissueSource } from "@/lib/billing/repository";
+import { getUserLocationId } from "@/lib/users/repository";
+import { hasPrintableTemplate } from "@/lib/printing/repository";
 import { ConsultationFlow } from "./consultation-flow";
 
 export const metadata: Metadata = {
@@ -22,7 +24,7 @@ export default async function ConsultationsPage({
 }: {
   searchParams: Promise<{ replaces?: string }>;
 }) {
-  await requireRole(["admin", "op_ip_desk"]);
+  const session = await requireRole(["admin", "op_ip_desk", "supervisor"]);
   const { replaces } = await searchParams;
   const doctors = await listActiveDoctors();
   let reissue: ReissueSource | null = null;
@@ -30,5 +32,10 @@ export default async function ConsultationsPage({
     const src = await getBillForReissue(replaces);
     if (src && src.type === "consultation") reissue = src;
   }
-  return <ConsultationFlow doctors={doctors} reissue={reissue} />;
+  // Server-resolved: a Print button shows only when a consultation design a print
+  // can actually use exists for this location (print-updates plan §1c). The client
+  // never decides printability.
+  const locationId = await getUserLocationId(session.sub);
+  const printable = locationId ? await hasPrintableTemplate("consultation", locationId) : false;
+  return <ConsultationFlow doctors={doctors} reissue={reissue} printable={printable} />;
 }

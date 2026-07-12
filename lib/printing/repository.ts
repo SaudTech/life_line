@@ -1,7 +1,7 @@
 import type { Template } from "@pdfme/common";
 import { pool } from "@/lib/db";
 import type { BillType } from "./fields";
-import { getDefaultTemplate } from "./defaults";
+import { DEFAULT_TEMPLATES, getDefaultTemplate } from "./defaults";
 
 // Data access for bill_templates (plan §4). Thin: each function is one
 // operation and nothing more - no validation, no pdfme-specific logic beyond
@@ -51,6 +51,26 @@ export async function getActiveTemplate(
     [locationId, type, `Default ${type} receipt`, JSON.stringify(getDefaultTemplate(type))],
   );
   return seeded.rows[0];
+}
+
+// Whether a PRINT can actually produce a receipt for this (type, location) - the
+// single rule every Print/Reprint button is server-gated by (print-updates plan
+// §1). True iff an admin-designed active row exists OR a checked-in default would
+// seed one on first print. Does NOT seed (a mere render check must not write), and
+// does NOT re-validate the stored row: save-time checkTemplate (actions.ts) already
+// guarantees a stored active row is valid, so existence is sufficient. A type with
+// neither (notably `advance`, which ships no default) returns false, so its button
+// simply never renders - no special-casing anywhere.
+export async function hasPrintableTemplate(
+  type: BillType,
+  locationId: string,
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM bill_templates WHERE bill_type = $1 AND location_id = $2 AND is_active LIMIT 1`,
+    [type, locationId],
+  );
+  if (rows[0]) return true; // an admin-designed active row exists
+  return type in DEFAULT_TEMPLATES; // or a checked-in default would seed on first print
 }
 
 // ── Library semantics (plan §2) ──────────────────────────────────────────────

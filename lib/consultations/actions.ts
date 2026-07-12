@@ -39,12 +39,13 @@ import {
 } from "./repository";
 
 // Server actions for the outpatient consultation flow (PROJECT_OVERVIEW §Consult).
-// Accessible to admins and the OP+IN desk only - gated on the SERVER in every
-// action (hiding UI is not security, §9). Money is decided here from authoritative
-// DB values via the pure rules (rules.ts, billing/rules.ts); the client's numbers
-// are never trusted. Discounts require a supervisor PIN, verified server-side.
+// Accessible to admins, the OP+IN desk, and supervisors (who work the full counter
+// as well as approving discounts) - gated on the SERVER in every action (hiding UI
+// is not security, §9). Money is decided here from authoritative DB values via the
+// pure rules (rules.ts, billing/rules.ts); the client's numbers are never trusted.
+// Discounts require a supervisor PIN, verified server-side.
 
-const CONSULT_ROLES = ["admin", "op_ip_desk"] as const;
+const CONSULT_ROLES = ["admin", "op_ip_desk", "supervisor"] as const;
 
 const PANEL_PATH = "/consultations";
 
@@ -100,7 +101,7 @@ export async function previewConsultationAction(input: {
 }): Promise<ActionResult<ConsultationPreview>> {
   await requireRole(CONSULT_ROLES);
   const doctor = await getDoctorById(input.doctorId);
-  if (!doctor || !doctor.active) {
+  if (!doctor || !doctor.active || doctor.status !== "available") {
     return { ok: false, formError: "That doctor is unavailable." };
   }
   const today = clinicToday();
@@ -146,7 +147,7 @@ export async function authorizeDiscountAction(input: {
     return { ok: false, fieldErrors: zodFieldErrors(pinParsed.error) };
   }
   const doctor = await getDoctorById(input.doctorId);
-  if (!doctor || !doctor.active) {
+  if (!doctor || !doctor.active || doctor.status !== "available") {
     return { ok: false, formError: "That doctor is unavailable." };
   }
   // Validate the discount inputs BEFORE the pure rules see them - an out-of-range
@@ -228,6 +229,9 @@ export async function startConsultationAction(
   }
   if (!doctor.active) {
     return { ok: false, fieldErrors: { doctorId: "That doctor is inactive." } };
+  }
+  if (doctor.status !== "available") {
+    return { ok: false, fieldErrors: { doctorId: "That doctor is not available today." } };
   }
 
   // Resolve the patient: existing id, or register a new one (reusing Part 1's

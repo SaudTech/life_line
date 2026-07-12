@@ -20,9 +20,8 @@ describe("navItemsForRole", () => {
       "OPD",
       "Procedures",
       "IPD",
-      "Billing",
       "Reports",
-      "Receipts",
+      "Receipt Designs",
     ]);
     // Real routes are not disabled; placeholders are and point nowhere real.
     expect(items.find((i) => i.label === "Users")).toEqual({
@@ -49,9 +48,9 @@ describe("navItemsForRole", () => {
       href: "/procedures",
       label: "Procedures",
     });
-    expect(items.find((i) => i.label === "Receipts")).toEqual({
+    expect(items.find((i) => i.label === "Receipt Designs")).toEqual({
       href: "/admin/receipts",
-      label: "Receipts",
+      label: "Receipt Designs",
     });
     expect(items.filter((i) => i.disabled).every((i) => i.href === "#")).toBe(true);
   });
@@ -67,6 +66,16 @@ describe("navItemsForRole", () => {
   it("gives the OP+IN desk the Counter, OPD, Procedures, IPD, and My Day links", () => {
     expect(navItemsForRole("op_ip_desk")).toEqual([
       { href: "/desk", label: "Counter" },
+      { href: "/consultations", label: "OPD" },
+      { href: "/procedures", label: "Procedures" },
+      { href: "/admissions", label: "IPD" },
+      { href: "/reports", label: "My Day" },
+    ]);
+  });
+
+  it("gives the supervisor the counter links (OPD, Procedures, IPD) plus Dashboard and My Day", () => {
+    expect(navItemsForRole("supervisor")).toEqual([
+      { href: "/supervisor", label: "Dashboard" },
       { href: "/consultations", label: "OPD" },
       { href: "/procedures", label: "Procedures" },
       { href: "/admissions", label: "IPD" },

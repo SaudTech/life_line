@@ -7,6 +7,8 @@ import {
   listReportableStaff,
   type ReportableStaff,
 } from "@/lib/reports/repository";
+import { getUserLocationId } from "@/lib/users/repository";
+import { hasPrintableTemplate } from "@/lib/printing/repository";
 import { DailyReportView } from "./daily-report";
 
 export const metadata: Metadata = {
@@ -21,9 +23,10 @@ export default async function ReportsPage() {
   const session = await requireSession();
   const today = clinicToday();
 
-  const [initial, staff] = await Promise.all([
+  const [initial, staff, locationId] = await Promise.all([
     generateDailyReportAction({ day: today }),
     loadStaffForAdmin(session.role, session.sub),
+    getUserLocationId(session.sub),
   ]);
 
   if (!initial.ok || !initial.data) {
@@ -34,7 +37,14 @@ export default async function ReportsPage() {
     );
   }
 
-  return <DailyReportView initial={initial.data} todayIso={today} staff={staff} />;
+  // Server-resolved: is there an End-Day design a print can use for this location?
+  // Gates the Print button (print-updates plan §1c/§4c). The on-screen report always
+  // renders for reading; only the printed A4 sheet depends on a template existing.
+  const printable = locationId ? await hasPrintableTemplate("end_day", locationId) : false;
+
+  return (
+    <DailyReportView initial={initial.data} todayIso={today} staff={staff} printable={printable} />
+  );
 }
 
 // The subject picker is admin-only, so only fetch the staff list for an admin. Any

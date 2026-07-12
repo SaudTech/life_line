@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/lib/auth/dal";
+import { requireRole } from "@/lib/auth/dal";
 import { logActivity } from "@/lib/audit";
 import { zodFieldErrors } from "@/lib/forms/action-result";
 import type { ActionResult } from "@/lib/forms/action-result";
-import { getUserLocationId, listUsersWithPermission } from "@/lib/users/repository";
+import { getUserLocationId } from "@/lib/users/repository";
 import { findPatientsByPhone, getPatient } from "@/lib/patients/repository";
 import { listActiveServices } from "@/lib/services/repository";
 import {
@@ -35,13 +35,15 @@ import {
   type ProcedureBillListRow,
 } from "./repository";
 
-// Server actions for the OPD procedures flow (plan §Part2) - bill service lines
-// against an active consultation. Gated on the PERMISSION (not the role, plan
-// §4A) in EVERY action: hiding UI is not security. Money is server-authoritative
-// throughout - every service is re-priced from the DB, never trusted from the
-// client (plan §4E).
+// Server actions for the OPD procedures flow - bill service lines against an
+// active consultation. Billing a procedure is a READ/USE of the service catalogue
+// (never an edit of it - repriceLines re-prices every line from the DB, so a
+// client price is never trusted), so it's gated by counter ROLE, not a permission:
+// op_desk, op_ip_desk, supervisor and admin can ring up procedure bills. Editing
+// the catalogue itself stays admin-only at /admin/services. Enforced in EVERY
+// action - hiding UI is not security (DEVELOPMENT_RULES §8).
 
-const PERMISSION = "service_lines.modify" as const;
+const PROCEDURE_ROLES = ["op_desk", "op_ip_desk", "supervisor", "admin"] as const;
 const PANEL_PATH = "/procedures";
 
 export interface ProcedureLookupPatient {
@@ -65,7 +67,7 @@ export type ProcedureLookupResult =
   | { mode: "phone"; patients: ProcedureLookupPatient[] }
   | { mode: "number"; target: ProcedureLookupTarget };
 
-// The procedures list (permission-gated same as the rest of this feature).
+// The procedures list (role-gated same as the rest of this feature).
 // Read-only; narrowed by any combination of filters - free text (patient/
 // doctor/bill number), who created it, a date range, an amount range, or a
 // specific service sold. Rupee amounts are converted to paise here, the one
@@ -73,7 +75,7 @@ export type ProcedureLookupResult =
 export async function listProcedureBillsAction(
   input: unknown,
 ): Promise<ActionResult<ProcedureBillListRow[]>> {
-  await requirePermission(PERMISSION);
+  await requireRole(PROCEDURE_ROLES);
   const parsed = procedureBillFiltersSchema.safeParse(input ?? {});
   if (!parsed.success) {
     return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
@@ -99,7 +101,7 @@ export async function listProcedureBillsAction(
 export async function lookupForProcedureAction(
   input: unknown,
 ): Promise<ActionResult<ProcedureLookupResult>> {
-  await requirePermission(PERMISSION);
+  await requireRole(PROCEDURE_ROLES);
   const parsed = lookupProcedureSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
@@ -185,7 +187,7 @@ export interface ProcedurePreview {
 export async function previewProcedureAction(input: {
   lines: unknown;
 }): Promise<ActionResult<ProcedurePreview>> {
-  await requirePermission(PERMISSION);
+  await requireRole(PROCEDURE_ROLES);
   // The operator may be mid-edit (a row with no service picked yet, or a
   // cleared quantity field) - a malformed line is simply dropped from the
   // preview rather than surfaced as an error, since nothing is written here.
@@ -221,7 +223,7 @@ export async function authorizeProcedureDiscountAction(input: {
   amount?: string; // flat rupee amount, e.g. "150" or "150.50"
   pin: string;
 }): Promise<ActionResult<ProcedureDiscountAuthorization>> {
-  const s = await requirePermission(PERMISSION);
+  const s = await requireRole(PROCEDURE_ROLES);
   const pinParsed = verifyPinSchema.safeParse({ pin: input.pin });
   if (!pinParsed.success) {
     return { ok: false, fieldErrors: zodFieldErrors(pinParsed.error) };
@@ -301,7 +303,7 @@ export interface ProcedureOutcome {
 export async function submitProcedureAction(
   input: unknown,
 ): Promise<ActionResult<ProcedureOutcome>> {
-  const s = await requirePermission(PERMISSION);
+  const s = await requireRole(PROCEDURE_ROLES);
 
   const parsed = submitProcedureSchema.safeParse(input);
   if (!parsed.success) {

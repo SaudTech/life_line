@@ -6,7 +6,35 @@
 
 import { labelFor } from "../fields";
 
+// The reserved top band (mm) the on-letterhead seed templates leave blank, so
+// our content starts BELOW the paper's pre-printed colour header (plan §3). The
+// admin tunes this per design via the "Reserved letterhead height" control; this
+// is only the sensible default the seeds ship with.
+export const LETTERHEAD_TOP_MM = 40;
+
+// One place that turns a page size + top offset into a pdfme `basePdf` (plan
+// §2/§3): `width`/`height` are the paper size in mm; `topMm` becomes padding[0]
+// (the reserved letterhead band). Side/bottom margins stay a fixed 10mm - only
+// the top band is design-specific. Presets below are just common calls of this.
+export function makeBasePdf({
+  width,
+  height,
+  topMm = 10,
+}: {
+  width: number;
+  height: number;
+  topMm?: number;
+}): { width: number; height: number; padding: [number, number, number, number] } {
+  return { width, height, padding: [topMm, 10, 10, 10] };
+}
+
 export const A4_BASE_PDF = { width: 210, height: 297, padding: [10, 10, 10, 10] as [number, number, number, number] };
+
+// Named quick-pick presets for the designer's Paper size control (plan §2).
+// Half-A4 is A4 cut across the middle (a common half-sheet receipt); A5 is the
+// portrait half. Each carries the reserved letterhead band by default.
+export const HALF_A4_BASE_PDF = makeBasePdf({ width: 210, height: 148.5, topMm: LETTERHEAD_TOP_MM });
+export const A5_BASE_PDF = makeBasePdf({ width: 148, height: 210, topMm: LETTERHEAD_TOP_MM });
 
 const TEXT_DEFAULTS = {
   type: "text" as const,

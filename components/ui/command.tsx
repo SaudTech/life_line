@@ -84,15 +84,29 @@ function CommandInput({
 
 function CommandList({
   className,
+  onWheel,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.List>) {
+  const ref = React.useRef<HTMLDivElement>(null)
   return (
     <CommandPrimitive.List
+      ref={ref}
       data-slot="command-list"
       className={cn(
         "max-h-64 scroll-py-1 overflow-x-hidden overflow-y-auto",
         className
       )}
+      // A Combobox opened from inside a Dialog portals here (to document.body),
+      // OUTSIDE the Dialog's DOM subtree. Radix Dialog locks body scroll via
+      // react-remove-scroll, which calls preventDefault() on any wheel event
+      // whose target isn't a descendant of the dialog's own content node - this
+      // list included. preventDefault() only cancels the BROWSER's native
+      // scroll, not a manual scrollTop change, so drive the scroll ourselves to
+      // keep the mouse wheel working in that nesting (and everywhere else).
+      onWheel={(e) => {
+        ref.current?.scrollBy({ top: e.deltaY })
+        onWheel?.(e)
+      }}
       {...props}
     />
   )

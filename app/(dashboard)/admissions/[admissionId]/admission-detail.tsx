@@ -59,10 +59,16 @@ export function AdmissionDetailView({
   detail,
   services,
   justAdmitted = false,
+  invoicePrintable,
+  advancePrintable,
 }: {
   detail: AdmissionDetail;
   services: ServiceRow[];
   justAdmitted?: boolean;
+  // Server-resolved Print gates (print-updates plan §1c): the discharge invoice
+  // (ip design) and the advance receipt (advance design, none ships) respectively.
+  invoicePrintable: boolean;
+  advancePrintable: boolean;
 }) {
   const dischargedInitially = detail.status === "discharged";
 
@@ -83,6 +89,7 @@ export function AdmissionDetailView({
         outcome={outcome}
         expenses={expenses}
         advancePaise={advancePaise}
+        invoicePrintable={invoicePrintable}
       />
     );
   }
@@ -100,6 +107,7 @@ export function AdmissionDetailView({
       expensesTotalPaise={expensesTotalPaise}
       runningTotalPaise={runningTotalPaise}
       onDischarged={setOutcome}
+      advancePrintable={advancePrintable}
     />
   );
 }
@@ -117,6 +125,7 @@ function AdmittedView({
   expensesTotalPaise,
   runningTotalPaise,
   onDischarged,
+  advancePrintable,
 }: {
   detail: AdmissionDetail;
   services: ServiceRow[];
@@ -129,6 +138,7 @@ function AdmittedView({
   expensesTotalPaise: number;
   runningTotalPaise: number;
   onDischarged: (o: DischargeOutcome) => void;
+  advancePrintable: boolean;
 }) {
   // Add-expense row.
   const [serviceId, setServiceId] = useState("");
@@ -274,15 +284,19 @@ function AdmittedView({
                   Admitted · advance ₹{formatPaise(advancePaise)} recorded
                 </p>
                 <p className="mt-0.5 text-xs text-accent-foreground/80">
-                  Print the advance receipt for the family, then add any service items below.
+                  {advancePrintable
+                    ? "Print the advance receipt for the family, then add any service items below."
+                    : "Add any service items below."}{" "}
                   You don&apos;t discharge yet - that&apos;s a separate step when the patient leaves.
                 </p>
               </div>
             </div>
-            <Button type="button" size="sm" className="shrink-0" onClick={() => printAdvanceReceipt(detail.id)}>
-              <ReceiptText aria-hidden />
-              Print advance receipt
-            </Button>
+            {advancePrintable ? (
+              <Button type="button" size="sm" className="shrink-0" onClick={() => printAdvanceReceipt(detail.id)}>
+                <ReceiptText aria-hidden />
+                Print advance receipt
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -380,14 +394,16 @@ function AdmittedView({
                 <Button asChild variant="outline" className="w-full">
                   <Link href="/admissions">Save &amp; keep admitted</Link>
                 </Button>
-                <button
-                  type="button"
-                  onClick={() => printAdvanceReceipt(detail.id)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <ReceiptText className="size-3.5" aria-hidden />
-                  Reprint advance receipt
-                </button>
+                {advancePrintable ? (
+                  <button
+                    type="button"
+                    onClick={() => printAdvanceReceipt(detail.id)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ReceiptText className="size-3.5" aria-hidden />
+                    Reprint advance receipt
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -513,11 +529,14 @@ function DischargedView({
   outcome,
   expenses,
   advancePaise,
+  invoicePrintable,
 }: {
   detail: AdmissionDetail;
   outcome: DischargeOutcome | null;
   expenses: AdmissionExpenseRow[];
   advancePaise: number;
+  // Server-resolved Print gate for the discharge invoice (print-updates §1c).
+  invoicePrintable: boolean;
 }) {
   const [voidOpen, setVoidOpen] = useState(false);
   const [voided, setVoided] = useState(false);
@@ -537,7 +556,7 @@ function DischargedView({
     printBtnRef.current?.focus();
   }, []);
   useEffect(() => {
-    if (!billId || !billNumber) return;
+    if (!billId || !billNumber || !invoicePrintable) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key.toLowerCase() === "p" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
@@ -546,7 +565,7 @@ function DischargedView({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [billId, billNumber, outcome]);
+  }, [billId, billNumber, outcome, invoicePrintable]);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -601,12 +620,14 @@ function DischargedView({
 
         {billId && billNumber ? (
           <div className="flex flex-col gap-2 px-6 pb-6">
-            <Button ref={printBtnRef} type="button" className="w-full" onClick={() => printReceipt(billId, billNumber, outcome ? undefined : { copy: "duplicate" })}>
-              <Printer aria-hidden />
-              Print invoice
-            </Button>
+            {invoicePrintable ? (
+              <Button ref={printBtnRef} type="button" className="w-full" onClick={() => printReceipt(billId, billNumber, outcome ? undefined : { copy: "duplicate" })}>
+                <Printer aria-hidden />
+                Print invoice
+              </Button>
+            ) : null}
             {!isVoid ? (
-              <Button type="button" variant="outline" className="w-full text-destructive hover:text-destructive" onClick={() => setVoidOpen(true)}>
+              <Button type="button" variant={invoicePrintable ? "outline" : "default"} className="w-full text-destructive hover:text-destructive" onClick={() => setVoidOpen(true)}>
                 Cancel this bill
               </Button>
             ) : null}

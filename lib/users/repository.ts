@@ -115,6 +115,23 @@ export async function listUsersWithPermission(
   return rows;
 }
 
+// Active staff in a given set of roles, for pickers that should only ever offer
+// people who can actually do something scoped by role (e.g. "who can create a
+// procedure bill" - the counter roles). Admin is included only if it's in the set.
+export async function listUsersByRole(
+  roles: readonly Role[],
+): Promise<{ id: string; name: string }[]> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    `SELECT id, name
+       FROM users
+      WHERE active
+        AND role = ANY($1)
+      ORDER BY name`,
+    [roles as readonly string[]],
+  );
+  return rows;
+}
+
 // Active supervisors/admins who hold a discount-approval PIN, with their pin_hash.
 // A discount PIN is verified by trying each hash (scrypt is salted per-row, so it
 // can't be looked up directly) - the matching row is the approver. SECURITY: the

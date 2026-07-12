@@ -2,31 +2,35 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowLeft, Pencil, Search, Stethoscope, X } from "lucide-react";
+import { Plus, ArrowLeft, Search, Stethoscope, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { formatPaise } from "@/lib/money";
 import { setDoctorActiveAction } from "@/lib/doctors/actions";
 import type { DoctorListRow } from "@/lib/doctors/repository";
 import { DoctorFormDialog } from "./doctor-form-dialog";
+import { DoctorCard } from "./doctor-card";
+import { DoctorRow } from "./doctor-row";
 
 type DialogState = { type: "add" | "edit"; doctorId: string | null } | null;
 
-// Client shell for the Doctors master list (plan §5, decision B: a calm table,
-// no style switcher, colour for status only). The server page loads every doctor
-// once - active and inactive - and this holds only which dialog is open, which
-// row has an in-flight status toggle, and the name/department search (the
-// catalog is small and fully preloaded, so this filters in memory rather than
-// round-tripping to the server - unlike the paginated history lists). Mutations
-// run in the server actions, which revalidate the page so fresh `doctors` flow
-// back as props.
+// Client shell for the Doctors master list - mirrors
+// app/(dashboard)/admin/users/users-manager.tsx: a card/list layout toggle, the
+// same search + meta-row + empty-state shape, and per-row actions collapsed
+// into a single dropdown, so the two master-list screens read as one design.
+// The server page loads every doctor once - active and inactive - and this
+// holds only which dialog is open, which row has an in-flight status toggle,
+// the layout choice, and the name/department search (the catalog is small and
+// fully preloaded, so this filters in memory rather than round-tripping to the
+// server - unlike the paginated history lists). Mutations run in the server
+// actions, which revalidate the page so fresh `doctors` flow back as props.
 export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [layout, setLayout] = useState<"card" | "list">("card");
 
   const q = search.trim().toLowerCase();
   const visible = useMemo(
@@ -57,7 +61,7 @@ export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
   }
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-6xl">
       <Link
         href="/admin"
         className="mb-5 inline-flex w-fit items-center gap-1.5 rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -81,29 +85,59 @@ export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
       </div>
 
       {doctors.length > 0 ? (
-        <div className="relative mb-3.5">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or department…"
-            aria-label="Search doctors"
-            className="pl-9 pr-8"
-          />
-          {search ? (
+        <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[210px] flex-1">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or department…"
+              aria-label="Search doctors"
+              className="pl-9 pr-8"
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-4" aria-hidden />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Card / list layout toggle. */}
+          <div className="flex h-9 items-center gap-0.5 rounded-lg border bg-white p-1">
             <button
               type="button"
-              onClick={() => setSearch("")}
-              aria-label="Clear search"
-              className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Card view"
+              aria-pressed={layout === "card"}
+              onClick={() => setLayout("card")}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                layout === "card" && "bg-accent text-accent-foreground",
+              )}
             >
-              <X className="size-4" aria-hidden />
+              <LayoutGrid className="size-4" aria-hidden />
             </button>
-          ) : null}
+            <button
+              type="button"
+              aria-label="List view"
+              aria-pressed={layout === "list"}
+              onClick={() => setLayout("list")}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                layout === "list" && "bg-accent text-accent-foreground",
+              )}
+            >
+              <List className="size-4" aria-hidden />
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -125,99 +159,33 @@ export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
         </div>
       ) : null}
 
+      {/* Grid, list, or empty state */}
       {visible.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Name</th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Department</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Fee
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Revisit validity
-                  </th>
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Status</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((d) => (
-                  <tr
-                    key={d.id}
-                    className={cn(
-                      "border-b border-border/60 last:border-b-0 transition-colors hover:bg-muted/30",
-                      !d.active && "opacity-60",
-                    )}
-                  >
-                    <td className="px-4 py-3 font-medium text-foreground">{d.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {d.department || <span className="text-muted-foreground/60">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground">
-                      ₹{formatPaise(d.fee_paise)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                      {d.revisit_validity_days} {d.revisit_validity_days === 1 ? "day" : "days"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                          d.active
-                            ? "bg-green-100 text-green-700"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "size-1.5 rounded-full",
-                            d.active ? "bg-green-600" : "bg-muted-foreground/60",
-                          )}
-                          aria-hidden
-                        />
-                        {d.active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDialog({ type: "edit", doctorId: d.id })}
-                        >
-                          <Pencil aria-hidden />
-                          Edit
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className={cn(
-                            !d.active && "text-green-700 hover:bg-green-100 hover:text-green-800",
-                          )}
-                          disabled={pendingId === d.id}
-                          onClick={() => toggleActive(d)}
-                        >
-                          {pendingId === d.id
-                            ? "Saving…"
-                            : d.active
-                              ? "Deactivate"
-                              : "Reactivate"}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        layout === "card" ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(288px,1fr))] gap-3.5">
+            {visible.map((d) => (
+              <DoctorCard
+                key={d.id}
+                doctor={d}
+                statusPending={pendingId === d.id}
+                onEdit={() => setDialog({ type: "edit", doctorId: d.id })}
+                onToggleActive={() => toggleActive(d)}
+              />
+            ))}
           </div>
-        </div>
+        ) : (
+          <div className="divide-y overflow-hidden rounded-md border">
+            {visible.map((d) => (
+              <DoctorRow
+                key={d.id}
+                doctor={d}
+                statusPending={pendingId === d.id}
+                onEdit={() => setDialog({ type: "edit", doctorId: d.id })}
+                onToggleActive={() => toggleActive(d)}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card/40 px-6 py-14 text-center">
           <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">

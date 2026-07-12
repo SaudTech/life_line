@@ -1,38 +1,15 @@
 import type { Template } from "@pdfme/common";
-import { A4_BASE_PDF, box, hLine, labeledField, staticText, tableField, textField } from "./build";
+import { LETTERHEAD_TOP_MM, box, hLine, labeledField, makeBasePdf, staticText, tableField, textField } from "./build";
 
 // Seed template for the `procedure` bill type (plan §4). Mirrors
-// consultation.ts's letterhead / patient / totals blocks, swapping the
-// doctor/validity rows for the line-items table.
+// consultation.ts's letterhead-safe layout (reserved top band, no hard-coded
+// header, plan §3), swapping the doctor/validity rows for the line-items table.
 export const PROCEDURE_DEFAULT_TEMPLATE = {
-  basePdf: A4_BASE_PDF,
+  basePdf: makeBasePdf({ width: 210, height: 297, topMm: LETTERHEAD_TOP_MM }),
   schemas: [
     [
-      // ── Letterhead ──────────────────────────────────────────────────────
-      textField("hospitalName", "Life Line", { x: 10, y: 11, w: 190, h: 10 }, {
-        fontSize: 24,
-        alignment: "center",
-        fontColor: "#0f172a",
-      }),
-      textField("hospitalTagline", "A MULTI SPECIALITY HOSPITAL", { x: 10, y: 22, w: 190, h: 4 }, {
-        fontSize: 8,
-        alignment: "center",
-        characterSpacing: 2,
-        fontColor: "#475569",
-      }),
-      textField("hospitalAddress", "Chandrayangutta 'X' Road, Hyderabad - 500 005", { x: 10, y: 27, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      textField("hospitalPhone", "Tel: 6309192617, 6309192618, 7382003300", { x: 10, y: 31, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      hLine(10, 38, 190, 0.6, "#0f172a"),
-
-      textField("billStatusLabel", "", { x: 150, y: 11, w: 50, h: 8 }, {
+      // Watermark hook (DUPLICATE / VOID), right of the title band, red.
+      textField("billStatusLabel", "", { x: 150, y: 41, w: 50, h: 8 }, {
         fontSize: 13,
         alignment: "right",
         fontColor: "#c0392b",

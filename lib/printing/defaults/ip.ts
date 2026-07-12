@@ -1,40 +1,17 @@
 import type { Template } from "@pdfme/common";
-import { A4_BASE_PDF, box, hLine, labeledField, staticText, tableField, textField } from "./build";
+import { LETTERHEAD_TOP_MM, box, hLine, labeledField, makeBasePdf, staticText, tableField, textField } from "./build";
 
 // Seed template for the `ip` (in-patient discharge) bill type (plan §6b) - a
-// working default so IP invoices print day one, before any admin edits it. Mirrors
-// consultation.ts / procedure.ts's letterhead / patient / totals blocks, adding
-// the IP-specific rows (admitted/discharged, room charge, advance) and the
-// itemised expenses table. "Reset to default" restores exactly this JSON.
+// working default so IP invoices print day one, before any admin edits it.
+// Letterhead-safe (plan §3): reserved top band, no hard-coded header. Adds the
+// IP-specific rows (admitted/discharged, room charge, advance) and the itemised
+// expenses table. "Reset to default" restores exactly this JSON.
 export const IP_DEFAULT_TEMPLATE = {
-  basePdf: A4_BASE_PDF,
+  basePdf: makeBasePdf({ width: 210, height: 297, topMm: LETTERHEAD_TOP_MM }),
   schemas: [
     [
-      // ── Letterhead ──────────────────────────────────────────────────────
-      textField("hospitalName", "Life Line", { x: 10, y: 11, w: 190, h: 10 }, {
-        fontSize: 24,
-        alignment: "center",
-        fontColor: "#0f172a",
-      }),
-      textField("hospitalTagline", "A MULTI SPECIALITY HOSPITAL", { x: 10, y: 22, w: 190, h: 4 }, {
-        fontSize: 8,
-        alignment: "center",
-        characterSpacing: 2,
-        fontColor: "#475569",
-      }),
-      textField("hospitalAddress", "Chandrayangutta 'X' Road, Hyderabad - 500 005", { x: 10, y: 27, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      textField("hospitalPhone", "Tel: 6309192617, 6309192618, 7382003300", { x: 10, y: 31, w: 190, h: 4 }, {
-        fontSize: 8.5,
-        alignment: "center",
-        fontColor: "#334155",
-      }),
-      hLine(10, 38, 190, 0.6, "#0f172a"),
-
-      textField("billStatusLabel", "", { x: 150, y: 11, w: 50, h: 8 }, {
+      // Watermark hook (DUPLICATE / VOID), right of the title band, red.
+      textField("billStatusLabel", "", { x: 150, y: 41, w: 50, h: 8 }, {
         fontSize: 13,
         alignment: "right",
         fontColor: "#c0392b",

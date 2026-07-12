@@ -71,9 +71,13 @@ function initialReissuePhone(reissue?: ReissueSource | null): string {
 export function ConsultationFlow({
   doctors,
   reissue,
+  printable,
 }: {
   doctors: DoctorListRow[];
   reissue?: ReissueSource | null;
+  // Server-resolved: is there a consultation design a print can use for this
+  // location? Gates the Print button (print-updates plan §1c).
+  printable: boolean;
 }) {
   // Step 1 - phone + matches
   const [phone, setPhone] = useState(() => initialReissuePhone(reissue));
@@ -254,7 +258,7 @@ export function ConsultationFlow({
     }
   }
 
-  if (outcome) return <SuccessScreen outcome={outcome} onReset={resetAll} />;
+  if (outcome) return <SuccessScreen outcome={outcome} onReset={resetAll} printable={printable} />;
 
   const showMobileTotal = patientReady && !!doctorId && !!preview;
 
@@ -427,7 +431,9 @@ export function ConsultationFlow({
       {patientReady ? (
         <StepCard n={3} title="Select doctor" done={!!doctorId}>
           {doctors.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active doctors. Add one under Doctors first.</p>
+            <p className="text-sm text-muted-foreground">
+              No doctors available right now. Check Doctors for status/leave, or add one.
+            </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {doctors.map((d) => {
@@ -781,10 +787,19 @@ function PinDialog({
 }
 
 // ── Success screen ───────────────────────────────────────────────────────────
-function SuccessScreen({ outcome, onReset }: { outcome: ConsultationOutcome; onReset: () => void }) {
+function SuccessScreen({
+  outcome,
+  onReset,
+  printable,
+}: {
+  outcome: ConsultationOutcome;
+  onReset: () => void;
+  printable: boolean;
+}) {
   const revisit = outcome.kind === "revisit";
-  // A free revisit creates no bill - there's nothing to print (print plan §2b).
-  const canPrint = outcome.billId != null;
+  // A free revisit creates no bill - there's nothing to print (print plan §2b);
+  // and no Print button at all unless a usable design exists (print-updates §1c).
+  const canPrint = outcome.billId != null && printable;
   const printBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {

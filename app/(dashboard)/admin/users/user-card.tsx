@@ -1,6 +1,15 @@
 "use client";
 
+import { MoreVertical, Pencil, KeyRound, Lock, UserX, UserCheck } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ROLE_LABELS, ROLE_ACCESS, PIN_ROLES, type Role } from "@/lib/users/schema";
 import type { UserListRow } from "@/lib/users/repository";
 
@@ -20,7 +29,7 @@ const DATE_FMT = new Intl.DateTimeFormat("en-IN", {
   year: "numeric",
 });
 
-interface CardProps {
+export interface CardProps {
   user: UserListRow;
   statusPending: boolean;
   onEdit: () => void;
@@ -29,7 +38,7 @@ interface CardProps {
   onStatus: () => void;
 }
 
-function useDerived(user: UserListRow) {
+export function useDerived(user: UserListRow) {
   const role = user.role as Role;
   return {
     role,
@@ -40,12 +49,10 @@ function useDerived(user: UserListRow) {
   };
 }
 
-const cardBtn =
-  "rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
-const pinBtn =
-  "rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-function Actions({
+// A single "more actions" trigger; every per-account action lives in the
+// dropdown instead of a row of buttons, so the card/list footprint stays fixed
+// no matter how many actions a role has.
+export function Actions({
   user,
   isPinRole,
   statusPending,
@@ -55,26 +62,40 @@ function Actions({
   onStatus,
 }: CardProps & { isPinRole: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <button type="button" onClick={onEdit} className={cardBtn}>
-        Edit
-      </button>
-      <button type="button" onClick={onReset} className={cardBtn}>
-        Reset password
-      </button>
-      {isPinRole ? (
-        <button type="button" onClick={onPin} className={pinBtn}>
-          {user.has_pin ? "Change PIN" : "Set PIN"}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={onStatus}
-        disabled={statusPending}
-        className={cn(cardBtn, "ml-auto", user.active && "text-destructive hover:bg-destructive/10")}
-      >
-        {statusPending ? "…" : user.active ? "Deactivate" : "Reactivate"}
-      </button>
+    <div className="flex justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={statusPending}
+            aria-label={`Actions for ${user.name}`}
+            className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-card text-secondary-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            <MoreVertical className="size-4" aria-hidden />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil aria-hidden />
+            Edit
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onReset}>
+            <KeyRound aria-hidden />
+            Reset password
+          </DropdownMenuItem>
+          {isPinRole ? (
+            <DropdownMenuItem onSelect={onPin}>
+              <Lock aria-hidden />
+              {user.has_pin ? "Change PIN" : "Set PIN"}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onStatus} variant={user.active ? "destructive" : "default"}>
+            {user.active ? <UserX aria-hidden /> : <UserCheck aria-hidden />}
+            {statusPending ? "…" : user.active ? "Deactivate" : "Reactivate"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -95,7 +116,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-function StatusPill({ active }: { active: boolean }) {
+export function StatusPill({ active }: { active: boolean }) {
   return (
     <span
       className={cn(
@@ -116,40 +137,42 @@ export function UserCard(props: CardProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 rounded-md border bg-card p-4 transition-shadow hover:shadow-sm",
+        "flex h-full flex-col gap-3 rounded-md border bg-card p-4 transition-shadow hover:shadow-sm",
         !user.active && "opacity-70",
       )}
     >
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className={cn(
-            "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold",
-            d.isTinted ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground",
-          )}
-        >
-          {d.initials}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold text-foreground">{user.name}</div>
-          <div className="text-xs font-medium text-muted-foreground">{ROLE_LABELS[d.role]}</div>
+      <div className="flex flex-1 flex-col gap-3">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold",
+              d.isTinted ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground",
+            )}
+          >
+            {d.initials}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-semibold text-foreground">{user.name}</div>
+            <div className="text-xs font-medium text-muted-foreground">{ROLE_LABELS[d.role]}</div>
+          </div>
+          <StatusPill active={user.active} />
         </div>
-        <StatusPill active={user.active} />
+
+        <div className="flex flex-col gap-1.5 text-xs font-medium">
+          <Row label="Access" value={ROLE_ACCESS[d.role]} />
+          <Row label="Phone" value={user.phone} mono />
+          <Row label="Added" value={d.added} />
+        </div>
+
+        {user.has_pin ? (
+          <div className="rounded-md bg-primary/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary">
+            Discount PIN set
+          </div>
+        ) : null}
       </div>
 
-      <div className="flex flex-col gap-1.5 text-xs font-medium">
-        <Row label="Access" value={ROLE_ACCESS[d.role]} />
-        <Row label="Phone" value={user.phone} mono />
-        <Row label="Added" value={d.added} />
-      </div>
-
-      {user.has_pin ? (
-        <div className="rounded-md bg-primary/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary">
-          Discount PIN set
-        </div>
-      ) : null}
-
-      <div className="border-t pt-3">
+      <div className="mt-auto border-t pt-3">
         <Actions {...props} isPinRole={d.isPinRole} />
       </div>
     </div>

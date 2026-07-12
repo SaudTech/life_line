@@ -46,7 +46,7 @@ import {
   setPinAction,
   setActiveAction,
 } from "@/lib/users/actions";
-import { PERMISSIONS, PERMISSION_KEYS } from "@/lib/permissions";
+import { PERMISSIONS, PERMISSION_KEYS, type PermissionMeta } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { ActionResult } from "@/lib/forms/action-result";
 import type { UserListRow } from "@/lib/users/repository";
@@ -101,6 +101,10 @@ function RoleField<T extends FieldValues>({
 // the RHF form as `permissions: string[]`. When role === admin the boxes render
 // all-on and disabled with a note - admins hold every permission implicitly, so
 // nothing redundant is stored (the server normalises an admin's grants to none).
+//
+// The registry is intentionally EMPTY today (no grantable capability yet), so the
+// checkbox list would be blank - render a muted "no optional permissions" note
+// instead of a bare legend, and re-add the list the day a real grant returns.
 function PermissionsField<T extends FieldValues>({
   control,
   name,
@@ -122,6 +126,18 @@ function PermissionsField<T extends FieldValues>({
             : value.filter((k) => k !== key);
           field.onChange(next);
         }
+        // No grantable capability in the registry yet: show an honest muted note
+        // rather than an empty control.
+        if (PERMISSION_KEYS.length === 0) {
+          return (
+            <fieldset className="flex flex-col gap-2.5">
+              <legend className="text-sm font-medium text-foreground">Permissions</legend>
+              <p className="text-xs text-muted-foreground">
+                No optional permissions - access is set entirely by the role above.
+              </p>
+            </fieldset>
+          );
+        }
         return (
           <fieldset className="flex flex-col gap-2.5">
             <legend className="text-sm font-medium text-foreground">Permissions</legend>
@@ -132,6 +148,10 @@ function PermissionsField<T extends FieldValues>({
             ) : null}
             <div className="flex flex-col gap-2">
               {PERMISSION_KEYS.map((key) => {
+                // Registry is empty today (PermissionKey === never), so this maps
+                // over nothing; the typed view keeps the branch compiling for the
+                // day a real grant returns.
+                const meta = (PERMISSIONS as Record<string, PermissionMeta>)[key];
                 const checked = isAdmin || value.includes(key);
                 return (
                   <label
@@ -150,10 +170,10 @@ function PermissionsField<T extends FieldValues>({
                     />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-foreground">
-                        {PERMISSIONS[key].label}
+                        {meta.label}
                       </span>
                       <span className="block text-xs text-muted-foreground">
-                        {PERMISSIONS[key].description}
+                        {meta.description}
                       </span>
                     </span>
                   </label>
