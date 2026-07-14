@@ -75,6 +75,7 @@ export const ACTIVITY = {
   "admission.discharge":       { label: "Patient discharged",         tone: "success" },
   "admission.advance_printed": { label: "Advance receipt printed",    tone: "accent"  },
   "admission.expense_added":   { label: "IP expense added",           tone: "accent"  },
+  "admission.expense_updated": { label: "IP expense quantity changed", tone: "accent"  },
   "admission.expense_removed": { label: "IP expense removed",         tone: "warning" },
 
   // ── Receipt / report templates ─────────────────────────────────────────

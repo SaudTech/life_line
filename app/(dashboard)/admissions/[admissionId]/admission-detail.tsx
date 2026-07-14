@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Eye, EyeOff, Loader2, Plus, Printer, ReceiptText, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, Loader2, Minus, Plus, Printer, ReceiptText, Trash2 } from "lucide-react";
 
 import {
   Dialog,
@@ -28,6 +28,7 @@ import { PAYMENT_MODES, type PaymentModeValue } from "@/lib/admissions/schema";
 import {
   addExpenseAction,
   removeExpenseAction,
+  updateExpenseQuantityAction,
   previewDischargeAction,
   authorizeDischargeDiscountAction,
   dischargeAction,
@@ -58,13 +59,11 @@ type Discount = {
 export function AdmissionDetailView({
   detail,
   services,
-  justAdmitted = false,
   invoicePrintable,
   advancePrintable,
 }: {
   detail: AdmissionDetail;
   services: ServiceRow[];
-  justAdmitted?: boolean;
   // Server-resolved Print gates (print-updates plan §1c): the discharge invoice
   // (ip design) and the advance receipt (advance design, none ships) respectively.
   invoicePrintable: boolean;
@@ -98,7 +97,6 @@ export function AdmissionDetailView({
     <AdmittedView
       detail={detail}
       services={services}
-      justAdmitted={justAdmitted}
       expenses={expenses}
       setExpenses={setExpenses}
       roomChargePaise={roomChargePaise}
@@ -116,7 +114,6 @@ export function AdmissionDetailView({
 function AdmittedView({
   detail,
   services,
-  justAdmitted,
   expenses,
   setExpenses,
   roomChargePaise,
@@ -129,7 +126,6 @@ function AdmittedView({
 }: {
   detail: AdmissionDetail;
   services: ServiceRow[];
-  justAdmitted: boolean;
   expenses: AdmissionExpenseRow[];
   setExpenses: (e: AdmissionExpenseRow[]) => void;
   roomChargePaise: number;
@@ -191,11 +187,6 @@ function AdmittedView({
     } finally {
       setAdding(false);
     }
-  }
-
-  async function removeExpense(expenseId: string) {
-    const res = await removeExpenseAction({ admissionId: detail.id, expenseId });
-    if (res.ok) applyTally(res.data!);
   }
 
   function applyTally(t: ExpenseTally) {
@@ -270,37 +261,6 @@ function AdmittedView({
       <BackLink />
       <PatientHeader detail={detail} status="admitted" />
 
-      {/* Just-admitted banner: print the advance receipt + reassure that items are
-          added now and discharge is a separate, later step. */}
-      {justAdmitted ? (
-        <div className="mb-4 rounded-2xl border border-primary/30 bg-accent p-4 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                <Check className="size-3.5" aria-hidden />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-accent-foreground">
-                  Admitted · advance ₹{formatPaise(advancePaise)} recorded
-                </p>
-                <p className="mt-0.5 text-xs text-accent-foreground/80">
-                  {advancePrintable
-                    ? "Print the advance receipt for the family, then add any service items below."
-                    : "Add any service items below."}{" "}
-                  You don&apos;t discharge yet - that&apos;s a separate step when the patient leaves.
-                </p>
-              </div>
-            </div>
-            {advancePrintable ? (
-              <Button type="button" size="sm" className="shrink-0" onClick={() => printAdvanceReceipt(detail.id)}>
-                <ReceiptText aria-hidden />
-                Print advance receipt
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-3">
           {/* Expenses */}
@@ -312,22 +272,7 @@ function AdmittedView({
             ) : (
               <div className="mb-3 grid gap-1.5">
                 {expenses.map((e) => (
-                  <div key={e.id} className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                    <span className="min-w-0 flex-1 truncate text-foreground">
-                      {e.item} <span className="text-muted-foreground">×{e.quantity}</span>
-                    </span>
-                    <span className="w-24 shrink-0 text-right font-semibold text-foreground">
-                      ₹{formatPaise(e.total_paise)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeExpense(e.id)}
-                      aria-label={`Remove ${e.item}`}
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <Trash2 className="size-4" aria-hidden />
-                    </button>
-                  </div>
+                  <ExpenseRow key={e.id} expense={e} admissionId={detail.id} applyTally={applyTally} />
                 ))}
               </div>
             )}
@@ -804,6 +749,103 @@ function DischargePinDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// One added expense: name, an inline quantity stepper, the server-priced total,
+// and remove. The quantity stays adjustable after adding - every change re-prices
+// on the server (updateExpenseQuantityAction) and the returned tally is applied, so
+// the amount shown is always server money (dev-rules §4), never a client formula.
+function ExpenseRow({
+  expense,
+  admissionId,
+  applyTally,
+}: {
+  expense: AdmissionExpenseRow;
+  admissionId: string;
+  applyTally: (t: ExpenseTally) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function setQuantity(quantity: number) {
+    if (quantity < 1 || quantity === expense.quantity || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await updateExpenseQuantityAction({ admissionId, expenseId: expense.id, quantity });
+      if (!res.ok) {
+        setError(res.formError ?? Object.values(res.fieldErrors ?? {})[0] ?? "Could not update.");
+        return;
+      }
+      applyTally(res.data!);
+    } catch {
+      setError("Could not update - please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await removeExpenseAction({ admissionId, expenseId: expense.id });
+      if (!res.ok) {
+        setError(res.formError ?? "Could not remove.");
+        return;
+      }
+      applyTally(res.data!);
+    } catch {
+      setError("Could not remove - please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-foreground">{expense.item}</span>
+        <div className="flex shrink-0 items-center rounded-lg border bg-background">
+          <button
+            type="button"
+            onClick={() => setQuantity(expense.quantity - 1)}
+            disabled={busy || expense.quantity <= 1}
+            aria-label={`Decrease ${expense.item} quantity`}
+            className="flex size-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Minus className="size-3.5" aria-hidden />
+          </button>
+          <span className="w-8 text-center text-sm font-medium tabular-nums text-foreground" aria-live="polite">
+            {busy ? <Loader2 className="mx-auto size-3.5 animate-spin" aria-hidden /> : expense.quantity}
+          </span>
+          <button
+            type="button"
+            onClick={() => setQuantity(expense.quantity + 1)}
+            disabled={busy}
+            aria-label={`Increase ${expense.item} quantity`}
+            className="flex size-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="size-3.5" aria-hidden />
+          </button>
+        </div>
+        <span className="w-24 shrink-0 text-right font-semibold text-foreground">
+          ₹{formatPaise(expense.total_paise)}
+        </span>
+        <button
+          type="button"
+          onClick={remove}
+          disabled={busy}
+          aria-label={`Remove ${expense.item}`}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Trash2 className="size-4" aria-hidden />
+        </button>
+      </div>
+      {error ? <p className="mt-1.5 text-xs font-medium text-destructive">{error}</p> : null}
+    </div>
   );
 }
 

@@ -380,17 +380,18 @@ export function ProcedureFlow({
         {/* Left column: find + lines */}
         <div className="space-y-3">
           {/* STEP 1 - Find */}
-          <StepCard n={1} title="Find the patient" done={!!target}>
+          <StepCard n={1} title="Find the patient or consultation" done={!!target}>
             <div className="flex items-center gap-2 rounded-xl border bg-muted/30 px-3 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
               <input
                 value={query}
-                onChange={(e) => setQuery(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => setQuery(e.target.value.replace(/\D/g, "").slice(0, 10))}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && query) runSearch(query);
                 }}
                 type="text"
                 inputMode="numeric"
                 autoFocus
+                maxLength={10}
                 placeholder="Mobile number or consultation number"
                 aria-label="Mobile number or consultation number"
                 className="h-12 flex-1 bg-transparent text-base font-semibold tracking-wide text-foreground outline-none placeholder:font-normal placeholder:tracking-normal"

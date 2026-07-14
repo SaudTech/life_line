@@ -298,6 +298,27 @@ export async function removeAdmissionExpense(input: {
   return res.rowCount === 1;
 }
 
+// Change the quantity (and its server-recomputed total) of an expense line on an
+// ADMITTED admission. Guarded on both the expense belonging to this admission AND
+// the admission still being admitted, so a discharged stay's itemisation can never
+// change after the bill exists. Returns true when a row was actually updated.
+export async function updateAdmissionExpenseQuantity(input: {
+  admissionId: string;
+  expenseId: string;
+  quantity: number;
+  totalPaise: number;
+}): Promise<boolean> {
+  const res = await pool.query(
+    `UPDATE admission_expenses
+        SET quantity = $3, total_paise = $4
+      WHERE id = $1
+        AND admission_id = $2
+        AND EXISTS (SELECT 1 FROM admissions WHERE id = $2 AND status = 'admitted')`,
+    [input.expenseId, input.admissionId, input.quantity, input.totalPaise],
+  );
+  return res.rowCount === 1;
+}
+
 export interface DischargeBillLineInput {
   description: string;
   quantity: number;

@@ -51,9 +51,9 @@ describe("buildConsultationDocument", () => {
     });
     expect(doc.patient.ageGender).toBe("34 / Female");
     expect(doc.payment).toEqual({ modeLabel: "Cash", cashierName: "Meera" });
-    expect(doc.totals.subtotalText).toBe("500.00");
+    expect(doc.totals.subtotalText).toBe("₹500.00");
     expect(doc.totals.discountText).toBeUndefined(); // no discount on this bill
-    expect(doc.totals.totalText).toBe("500.00");
+    expect(doc.totals.totalText).toBe("₹500.00");
     expect(doc.totals.totalInWords).toBe("Five Hundred Rupees Only");
     expect(doc.doctorName).toBe("Dr. Anita");
     expect(doc.reason).toBe("Fever");
@@ -65,7 +65,7 @@ describe("buildConsultationDocument", () => {
       { ...BASE_CORE, discountPaise: "5000", totalPaise: "45000" },
       { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026" },
     );
-    expect(doc.totals.discountText).toBe("50.00");
+    expect(doc.totals.discountText).toBe("₹50.00");
     expect(doc.reason).toBeUndefined();
   });
 
@@ -100,8 +100,8 @@ describe("buildProcedureDocument", () => {
     ]);
     expect(doc.type).toBe("procedure");
     expect(doc.items).toEqual([
-      { desc: "IV Fluid", qty: "2", unitText: "150.00", lineText: "300.00" },
-      { desc: "Injection", qty: "1", unitText: "200.00", lineText: "200.00" },
+      { desc: "IV Fluid", qty: "2", unitText: "₹150.00", lineText: "₹300.00" },
+      { desc: "Injection", qty: "1", unitText: "₹200.00", lineText: "₹200.00" },
     ]);
   });
 

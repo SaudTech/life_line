@@ -19,6 +19,8 @@ export interface UserListRow {
   active: boolean;
   has_pin: boolean;
   permissions: string[];
+  supervisor_id: string | null;
+  supervisor_name: string | null; // resolved for display; null when unassigned
   created_at: Date;
 }
 
@@ -27,10 +29,13 @@ export interface UserListRow {
 // so the client can render the granted checkboxes.
 export async function listUsers(): Promise<UserListRow[]> {
   const { rows } = await pool.query<UserListRow>(
-    `SELECT id, name, phone, email, role, active,
-            (pin_hash IS NOT NULL) AS has_pin, permissions, created_at
-       FROM users
-      ORDER BY name ASC`,
+    `SELECT u.id, u.name, u.phone, u.email, u.role, u.active,
+            (u.pin_hash IS NOT NULL) AS has_pin, u.permissions,
+            u.supervisor_id, sup.name AS supervisor_name,
+            u.created_at
+       FROM users u
+       LEFT JOIN users sup ON sup.id = u.supervisor_id
+      ORDER BY u.name ASC`,
   );
   return rows;
 }
@@ -43,6 +48,7 @@ export interface CreateUserInput {
   password_hash: string;
   pin_hash: string | null;
   permissions: string[]; // validated against the registry by the action (plan B-4)
+  supervisor_id: string | null; // validated as an active supervisor/admin by the action
   location_id: string; // bigint returned by pg as string
 }
 
@@ -50,8 +56,8 @@ export interface CreateUserInput {
 // violation) to map users_phone_unique / users_email_unique to a field error.
 export async function createUser(input: CreateUserInput): Promise<{ id: string }> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO users (name, phone, email, role, password_hash, pin_hash, permissions, location_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO users (name, phone, email, role, password_hash, pin_hash, permissions, supervisor_id, location_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id`,
     [
       input.name,
@@ -61,6 +67,7 @@ export async function createUser(input: CreateUserInput): Promise<{ id: string }
       input.password_hash,
       input.pin_hash,
       input.permissions,
+      input.supervisor_id,
       input.location_id,
     ],
   );
@@ -74,16 +81,30 @@ export interface UpdateUserInput {
   email: string | null;
   role: Role;
   permissions: string[]; // validated against the registry by the action (plan B-4)
+  supervisor_id: string | null; // validated as an active supervisor/admin by the action
 }
 
 // UPDATE the editable details (never the password/PIN). Caller catches 23505.
 export async function updateUser(input: UpdateUserInput): Promise<void> {
   await pool.query(
     `UPDATE users
-        SET name = $2, phone = $3, email = $4, role = $5, permissions = $6
+        SET name = $2, phone = $3, email = $4, role = $5, permissions = $6, supervisor_id = $7
       WHERE id = $1`,
-    [input.id, input.name, input.phone, input.email, input.role, input.permissions],
+    [input.id, input.name, input.phone, input.email, input.role, input.permissions, input.supervisor_id],
   );
+}
+
+// A candidate supervisor's eligibility, read from DB state (never trust the
+// client). Used by the actions to enforce that an assigned supervisor exists, is
+// active, and holds a supervisory role. Null if the id doesn't exist.
+export async function getSupervisorCandidate(
+  id: string,
+): Promise<{ role: Role; active: boolean } | null> {
+  const { rows } = await pool.query<{ role: Role; active: boolean }>(
+    `SELECT role, active FROM users WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
 }
 
 export async function setUserPassword(
@@ -236,12 +257,16 @@ export interface UserProfile {
   name: string;
   phone: string;
   email: string | null;
+  supervisor_name: string | null; // who this user reports to; null when unassigned
 }
 
 export const getUserProfile = cache(
   async (id: string): Promise<UserProfile | null> => {
     const { rows } = await pool.query<UserProfile>(
-      `SELECT name, phone, email FROM users WHERE id = $1`,
+      `SELECT u.name, u.phone, u.email, sup.name AS supervisor_name
+         FROM users u
+         LEFT JOIN users sup ON sup.id = u.supervisor_id
+        WHERE u.id = $1`,
       [id],
     );
     return rows[0] ?? null;

@@ -27,6 +27,7 @@ import {
   admitSchema,
   addExpenseSchema,
   removeExpenseSchema,
+  updateExpenseSchema,
   dischargeSchema,
   type PaymentModeValue,
 } from "./schema";
@@ -34,6 +35,7 @@ import {
   createAdmission,
   addAdmissionExpense,
   removeAdmissionExpense,
+  updateAdmissionExpenseQuantity,
   getAdmissionForDischarge,
   getAdmissionDetail,
   dischargeWithBill,
@@ -256,6 +258,58 @@ export async function addExpenseAction(input: unknown): Promise<ActionResult<Exp
     targetId: v.admissionId,
     locationId,
     details: { item: service.name, quantity: v.quantity, total_paise: totalPaise },
+  });
+
+  revalidatePath(PANEL_PATH);
+  revalidatePath(`${PANEL_PATH}/${v.admissionId}`);
+  const tally = await tallyFor(v.admissionId);
+  return { ok: true, data: tally! };
+}
+
+// Adjust the quantity of an existing catalog expense (inline stepper on the tally).
+// Re-prices server-side from the LIVE catalog exactly like addExpenseAction - the
+// client's amount is never trusted. The item is matched to its catalog service by
+// the stored name snapshot; if that service is gone, the change is rejected rather
+// than silently repriced.
+export async function updateExpenseQuantityAction(input: unknown): Promise<ActionResult<ExpenseTally>> {
+  const s = await requireRole(IP_ROLES);
+  const parsed = updateExpenseSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
+  }
+  const v = parsed.data;
+
+  const detail = await getAdmissionDetail(v.admissionId);
+  if (!detail) return { ok: false, formError: "That admission no longer exists." };
+  const existing = detail.expenses.find((e) => e.id === v.expenseId);
+  if (!existing) return { ok: false, formError: "That expense could not be found." };
+
+  const services = await listActiveServices();
+  const service = services.find((sv) => sv.name === existing.item);
+  if (!service) {
+    return { ok: false, formError: "That service is no longer available to re-price." };
+  }
+  const unitPricePaise = Number(service.price_paise);
+  const totalPaise = computeLineTotal(unitPricePaise, v.quantity);
+
+  const updated = await updateAdmissionExpenseQuantity({
+    admissionId: v.admissionId,
+    expenseId: v.expenseId,
+    quantity: v.quantity,
+    totalPaise,
+  });
+  if (!updated) {
+    return { ok: false, formError: "This admission is not open for changes." };
+  }
+
+  const locationId = await getUserLocationId(s.sub);
+  await logActivity({
+    actorId: s.sub,
+    action: "admission.expense_updated",
+    entity: "admission",
+    targetId: v.admissionId,
+    locationId,
+    details: { expense_id: v.expenseId, item: existing.item, quantity: v.quantity, total_paise: totalPaise },
   });
 
   revalidatePath(PANEL_PATH);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePersistentView } from "@/lib/hooks/use-persistent-view";
 import Link from "next/link";
 import { Plus, ArrowLeft, Search, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
@@ -47,7 +48,7 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [layout, setLayout] = useState<"card" | "list">("card");
+  const [layout, setLayout] = usePersistentView("view:users");
 
   const q = search.trim().toLowerCase();
   const filtersActive = q !== "" || roleFilter !== "all" || statusFilter !== "all";
@@ -71,6 +72,18 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
   );
 
   const activeUser = dialog?.userId ? users.find((u) => u.id === dialog.userId) ?? null : null;
+
+  // Eligible supervisors: active supervisors + admins, plus a "None" entry. Built
+  // once from the loaded list (the server re-validates the choice on save).
+  const supervisorOptions = useMemo<ComboboxOption[]>(
+    () => [
+      { value: "", label: "No supervisor" },
+      ...users
+        .filter((u) => u.active && (u.role === "supervisor" || u.role === "admin"))
+        .map((u) => ({ value: u.id, label: `${u.name} · ${ROLE_LABELS[u.role]}` })),
+    ],
+    [users],
+  );
 
   function open(type: DialogType, userId: string | null) {
     setDialog({ type, userId });
@@ -264,10 +277,10 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
 
       {/* Dialogs */}
       {dialog?.type === "add" ? (
-        <UserFormDialog mode="add" user={null} onClose={close} onCreated={close} />
+        <UserFormDialog mode="add" user={null} supervisorOptions={supervisorOptions} onClose={close} onCreated={close} />
       ) : null}
       {dialog?.type === "edit" && activeUser ? (
-        <UserFormDialog mode="edit" user={activeUser} onClose={close} onCreated={close} />
+        <UserFormDialog mode="edit" user={activeUser} supervisorOptions={supervisorOptions} onClose={close} onCreated={close} />
       ) : null}
       {dialog?.type === "reset" && activeUser ? (
         <ResetPasswordDialog user={activeUser} onClose={close} />

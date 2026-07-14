@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePersistentView } from "@/lib/hooks/use-persistent-view";
 import Link from "next/link";
 import { Plus, ArrowLeft, Search, Users, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +32,7 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
   const [results, setResults] = useState<PatientRow[]>([]);
   const [pending, setPending] = useState(false);
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [layout, setLayout] = useState<"card" | "list">("card");
+  const [layout, setLayout] = usePersistentView("view:patients");
 
   // Guard against out-of-order responses: only the latest query's results win.
   const latest = useRef(0);

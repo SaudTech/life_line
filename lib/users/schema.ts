@@ -48,6 +48,11 @@ const email = z
 const password = z.string().min(8, "Password must be at least 8 characters.");
 const pin = z.string().regex(/^\d{4,6}$/, "PIN must be 4-6 digits.");
 
+// The supervisor a staff member reports to (plan: staff↔supervisor link). A user
+// id, or "" for "no supervisor". The server re-checks that the id belongs to an
+// active supervisor/admin and isn't the user themselves - this only shapes input.
+const supervisorId = z.union([z.string().uuid(), z.literal("")]).optional();
+
 // Granular permissions (plan 1B). Each entry must be a KEY from the typed registry
 // (lib/permissions.ts) - the server rejects any key not in the registry (plan
 // B-4), so the client checkbox list can never smuggle in an unknown capability.
@@ -68,6 +73,7 @@ export const newUserSchema = z.object({
   email,
   pin: z.union([pin, z.literal("")]).optional(), // optional; "" = no PIN
   permissions,
+  supervisorId,
 });
 export type NewUserValues = z.infer<typeof newUserSchema>;
 
@@ -78,6 +84,7 @@ export const updateUserSchema = z.object({
   role: z.enum(ROLES),
   email,
   permissions,
+  supervisorId,
 });
 export type UpdateUserValues = z.infer<typeof updateUserSchema>;
 

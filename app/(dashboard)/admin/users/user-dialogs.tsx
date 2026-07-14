@@ -97,6 +97,41 @@ function RoleField<T extends FieldValues>({
   );
 }
 
+// Supervisor picker (staff↔supervisor link). A searchable <Combobox> over the
+// active supervisors/admins passed from the manager, plus a "No supervisor" entry
+// (value ""). The relationship is display/reporting only for now - no permissions
+// ride on it yet. The server re-checks the choice is a real active supervisor.
+function SupervisorField<T extends FieldValues>({
+  control,
+  name,
+  options,
+  invalid,
+}: {
+  control: import("react-hook-form").Control<T>;
+  name: Path<T>;
+  options: ComboboxOption[];
+  invalid: boolean;
+}) {
+  return (
+    <Controller
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <Combobox
+          options={options}
+          value={field.value ?? ""}
+          onChange={field.onChange}
+          onBlur={field.onBlur}
+          invalid={invalid}
+          placeholder="No supervisor"
+          searchPlaceholder="Search staff…"
+          ariaLabel="Supervisor"
+        />
+      )}
+    />
+  );
+}
+
 // Granular permissions section (plan 1B): a checkbox per registry key, bound into
 // the RHF form as `permissions: string[]`. When role === admin the boxes render
 // all-on and disabled with a note - admins hold every permission implicitly, so
@@ -191,17 +226,19 @@ function PermissionsField<T extends FieldValues>({
 export function UserFormDialog({
   mode,
   user,
+  supervisorOptions,
   onClose,
   onCreated,
 }: {
   mode: "add" | "edit";
   user: UserListRow | null;
+  supervisorOptions: ComboboxOption[];
   onClose: () => void;
   onCreated: () => void;
 }) {
   // Two shapes share this dialog; branch the form type on mode.
-  if (mode === "add") return <AddForm onClose={onClose} onCreated={onCreated} />;
-  if (user) return <EditForm user={user} onClose={onClose} />;
+  if (mode === "add") return <AddForm supervisorOptions={supervisorOptions} onClose={onClose} onCreated={onCreated} />;
+  if (user) return <EditForm user={user} supervisorOptions={supervisorOptions} onClose={onClose} />;
   return null;
 }
 
@@ -229,14 +266,22 @@ function DialogShell({
   );
 }
 
-function AddForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function AddForm({
+  supervisorOptions,
+  onClose,
+  onCreated,
+}: {
+  supervisorOptions: ComboboxOption[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   // Three generics: `permissions` has a zod .default([]), so the FORM value (input)
   // is wider than the validated NewUserValues (output) handleSubmit hands us.
   const form = useForm<z.input<typeof newUserSchema>, unknown, NewUserValues>({
     resolver: zodResolver(newUserSchema),
     mode: "onTouched",
     reValidateMode: "onChange",
-    defaultValues: { name: "", phone: "", role: "op_desk", password: "", email: "", permissions: [] },
+    defaultValues: { name: "", phone: "", role: "op_desk", password: "", email: "", permissions: [], supervisorId: "" },
   });
   const {
     register,
@@ -286,6 +331,12 @@ function AddForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =>
             <Input id="af-email" type="email" placeholder="name@lifelinehospital.org" aria-invalid={errors.email ? true : undefined} {...register("email")} />
             <FieldError errors={[errors.email]} />
           </Field>
+          <Field data-invalid={errors.supervisorId ? true : undefined}>
+            <FieldLabel htmlFor="supervisor">Supervisor (optional)</FieldLabel>
+            <SupervisorField control={control} name="supervisorId" options={supervisorOptions} invalid={!!errors.supervisorId} />
+            <p className="text-xs text-muted-foreground">Who this staff member reports to.</p>
+            <FieldError errors={[errors.supervisorId]} />
+          </Field>
           <PermissionsField control={control} name="permissions" isAdmin={role === "admin"} />
           {errors.root ? <FieldError errors={[errors.root]} /> : null}
         </FieldGroup>
@@ -298,7 +349,15 @@ function AddForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =>
   );
 }
 
-function EditForm({ user, onClose }: { user: UserListRow; onClose: () => void }) {
+function EditForm({
+  user,
+  supervisorOptions,
+  onClose,
+}: {
+  user: UserListRow;
+  supervisorOptions: ComboboxOption[];
+  onClose: () => void;
+}) {
   const form = useForm<z.input<typeof updateUserSchema>, unknown, UpdateUserValues>({
     resolver: zodResolver(updateUserSchema),
     mode: "onTouched",
@@ -314,6 +373,7 @@ function EditForm({ user, onClose }: { user: UserListRow; onClose: () => void })
       permissions: user.permissions.filter((p) =>
         (PERMISSION_KEYS as string[]).includes(p),
       ),
+      supervisorId: user.supervisor_id ?? "",
     },
   });
   const {
@@ -358,6 +418,18 @@ function EditForm({ user, onClose }: { user: UserListRow; onClose: () => void })
             <RoleField control={control} name="role" invalid={!!errors.role} />
             <p className="text-xs text-muted-foreground">{ROLE_ACCESS[role]}</p>
             <FieldError errors={[errors.role]} />
+          </Field>
+          <Field data-invalid={errors.supervisorId ? true : undefined}>
+            <FieldLabel htmlFor="supervisor">Supervisor (optional)</FieldLabel>
+            {/* A user can't be their own supervisor - drop themselves from the list. */}
+            <SupervisorField
+              control={control}
+              name="supervisorId"
+              options={supervisorOptions.filter((o) => o.value !== user.id)}
+              invalid={!!errors.supervisorId}
+            />
+            <p className="text-xs text-muted-foreground">Who this staff member reports to.</p>
+            <FieldError errors={[errors.supervisorId]} />
           </Field>
           <PermissionsField control={control} name="permissions" isAdmin={role === "admin"} />
           {errors.root ? <FieldError errors={[errors.root]} /> : null}

@@ -129,7 +129,13 @@ export function staticText(
 const TABLE_DEFAULTS = {
   type: "table" as const,
   showHead: true,
-  repeatHead: false,
+  // repeatHead MUST be true for correct pagination: pdfme only runs its
+  // keep-whole-rows-together page-break logic (which pushes a row that doesn't fit
+  // to the next page, rather than slicing it) when repeatHead is on and the basePdf
+  // is a blank page (getDynamicHeightsForTable in @pdfme/schemas). With it off, a
+  // table that overflows a page gets rows cut in half across the boundary. It also
+  // repeats the header on each continuation page, which is what you want anyway.
+  repeatHead: true,
   tableStyles: { borderColor: "#000000", borderWidth: 0.3 },
   headStyles: {
     alignment: "left" as const,

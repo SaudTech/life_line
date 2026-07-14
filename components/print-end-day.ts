@@ -3,12 +3,14 @@
 // The reports page's print entry point for the A4 End-Day sheet (print-updates
 // plan §4c) - opens the end-day PDF route in a hidden iframe and calls the
 // browser's native print dialog, exactly like components/print-receipt.ts for
-// bills. The route is SELF-SCOPED (it forces session.sub server-side), so this
-// only ever passes the clinic day being viewed - never a user id. Pure GET, fully
+// bills. `subject` is the report subject being viewed ("everyone" or a staff id);
+// the route RE-AUTHORIZES it server-side (a non-admin is forced to their own day),
+// so passing it is safe and just makes the print match the screen. Pure GET, fully
 // retryable; a jammed printer or a re-click just reprints.
-export function printEndDay(dayIso: string): void {
+export function printEndDay(dayIso: string, subject?: string): void {
   // Cache-bust every print (Chrome's built-in PDF viewer reuses seen URLs).
   const params = new URLSearchParams({ day: dayIso, _: Date.now().toString() });
+  if (subject) params.set("subject", subject);
   const url = `/api/reports/end-day/pdf?${params.toString()}`;
 
   const iframe = document.createElement("iframe");

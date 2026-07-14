@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { loginAction } from "@/lib/auth/actions";
@@ -30,6 +31,10 @@ export default function LoginForm() {
     setError,
     formState: { errors, isSubmitting },
   } = form;
+
+  // No self-service reset - accounts are admin-managed (dev-rules §8). The link
+  // just reveals who to contact rather than pretending a reset flow exists.
+  const [showForgot, setShowForgot] = useState(false);
 
   async function onSubmit(values: LoginValues) {
     // On success the server action redirects (throws to unwind), so nothing
@@ -83,6 +88,22 @@ export default function LoginForm() {
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Signing in…" : "Sign in"}
         </Button>
+
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={() => setShowForgot((v) => !v)}
+            aria-expanded={showForgot}
+            className="text-xs font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+          >
+            Forgot password?
+          </button>
+          {showForgot ? (
+            <p className="mt-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Contact your admin - they can help reset your password.
+            </p>
+          ) : null}
+        </div>
       </FieldGroup>
     </form>
   );

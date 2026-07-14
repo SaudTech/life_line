@@ -32,8 +32,8 @@ describe("end_day report inputs", () => {
     expect(fieldKind("modeTable")).toBe("table");
     expect(fieldKind("typeTable")).toBe("table");
     expect(fieldKind("activityTable")).toBe("table");
-    expect(JSON.parse(inputs.modeTable)[0]).toEqual(["Cash", "11", "7,200.00"]);
-    expect(JSON.parse(inputs.typeTable)[0]).toEqual(["Consultation", "12", "6,000.00"]);
+    expect(JSON.parse(inputs.modeTable)[0]).toEqual(["Cash", "11", "₹7,200.00"]);
+    expect(JSON.parse(inputs.typeTable)[0]).toEqual(["Consultation", "12", "₹6,000.00"]);
     expect(JSON.parse(inputs.activityTable)[0]).toEqual(["Patients registered", "4"]);
   });
 
@@ -41,7 +41,7 @@ describe("end_day report inputs", () => {
     const doc = sampleBillDocument("end_day");
     const inputs = billDocumentToInputs(doc);
     expect(fieldKind("grandTotalText")).toBe("labeled");
-    expect(JSON.parse(inputs.grandTotalText)).toEqual({ grandTotalText: "12,450.00" });
+    expect(JSON.parse(inputs.grandTotalText)).toEqual({ grandTotalText: "₹12,450.00" });
     expect(fieldKind("hospitalName")).toBe("plain");
     expect(inputs.hospitalName).toBe("Life Line");
   });
@@ -65,8 +65,8 @@ describe("billDocumentToInputs table encoding", () => {
     const doc = sampleBillDocument("procedure");
     const inputs = billDocumentToInputs(doc);
     expect(JSON.parse(inputs.items)).toEqual([
-      ["IV Fluid", "2", "150.00", "300.00"],
-      ["Injection", "1", "150.00", "150.00"],
+      ["IV Fluid", "2", "₹150.00", "₹300.00"],
+      ["Injection", "1", "₹150.00", "₹150.00"],
     ]);
   });
 });

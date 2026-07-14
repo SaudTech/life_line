@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePersistentView } from "@/lib/hooks/use-persistent-view";
 import Link from "next/link";
 import { Plus, ArrowLeft, Search, Stethoscope, X, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
@@ -30,7 +31,7 @@ export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [layout, setLayout] = useState<"card" | "list">("card");
+  const [layout, setLayout] = usePersistentView("view:doctors");
 
   const q = search.trim().toLowerCase();
   const visible = useMemo(

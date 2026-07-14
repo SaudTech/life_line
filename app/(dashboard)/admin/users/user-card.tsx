@@ -162,6 +162,7 @@ export function UserCard(props: CardProps) {
         <div className="flex flex-col gap-1.5 text-xs font-medium">
           <Row label="Access" value={ROLE_ACCESS[d.role]} />
           <Row label="Phone" value={user.phone} mono />
+          {user.supervisor_name ? <Row label="Supervisor" value={user.supervisor_name} /> : null}
           <Row label="Added" value={d.added} />
         </div>
 

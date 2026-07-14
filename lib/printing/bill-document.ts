@@ -1,4 +1,4 @@
-import { formatPaise } from "@/lib/money";
+import { formatRupees } from "@/lib/money";
 import { amountInWords } from "./amount-in-words";
 
 // PURE render-model types + shaping logic (no DB import here on purpose - the
@@ -175,8 +175,8 @@ export function buildProcedureDocument(
     items: items.map((i) => ({
       desc: i.description,
       qty: String(i.quantity),
-      unitText: formatPaise(i.unitPricePaise),
-      lineText: formatPaise(i.lineTotalPaise),
+      unitText: formatRupees(i.unitPricePaise),
+      lineText: formatRupees(i.lineTotalPaise),
     })),
   };
 }
@@ -206,22 +206,22 @@ export function buildIpDocument(
   const balanceDue = Math.max(0, totalPaise - advancePaise);
   const refund = Math.max(0, advancePaise - totalPaise);
   const balanceText =
-    refund > 0 ? `Refund ${formatPaise(refund)}` : formatPaise(balanceDue);
+    refund > 0 ? `Refund ${formatRupees(refund)}` : formatRupees(balanceDue);
   const hasBreakdown = ip.roomRatePaise != null && ip.roomDays != null && Number(ip.roomChargePaise) > 0;
   const roomChargeText = hasBreakdown
-    ? `${formatPaise(ip.roomChargePaise)} (${formatPaise(ip.roomRatePaise!)}/day x ${ip.roomDays})`
-    : formatPaise(ip.roomChargePaise);
+    ? `${formatRupees(ip.roomChargePaise)} (${formatRupees(ip.roomRatePaise!)}/day x ${ip.roomDays})`
+    : formatRupees(ip.roomChargePaise);
   return {
     ...buildCommon(core),
     type: "ip",
     admittedText: ip.admittedText,
     dischargedText: ip.dischargedText ?? undefined,
     roomChargeText,
-    advanceText: formatPaise(ip.advancePaise),
+    advanceText: formatRupees(ip.advancePaise),
     expenses: ip.expenses.map((e) => ({
       item: e.item,
       qty: String(e.quantity),
-      amountText: formatPaise(e.totalPaise),
+      amountText: formatRupees(e.totalPaise),
     })),
     balanceText,
   };
@@ -256,9 +256,9 @@ function buildCommon(core: BillDocumentCore): BillDocument {
       cashierName: core.cashierName,
     },
     totals: {
-      subtotalText: formatPaise(core.subtotalPaise),
-      discountText: Number(core.discountPaise) > 0 ? formatPaise(core.discountPaise) : undefined,
-      totalText: formatPaise(core.totalPaise),
+      subtotalText: formatRupees(core.subtotalPaise),
+      discountText: Number(core.discountPaise) > 0 ? formatRupees(core.discountPaise) : undefined,
+      totalText: formatRupees(core.totalPaise),
       totalInWords: amountInWords(core.totalPaise),
     },
   };

@@ -30,8 +30,9 @@ import { ChartCard, MoneyBarChart, PaymentModeDonut } from "./charts";
 // component NEVER sums money itself (dev-rules §2/§26). The breakdowns render as
 // Recharts charts (./charts) in the app's calm teal palette; colour is for status
 // only (§5). An admin gets a subject picker (Hospital total + any staff member);
-// everyone else is pinned to their own data (server-enforced). Printable as an A4
-// handover sheet (window.print() + the print stylesheet in globals.css).
+// everyone else is pinned to their own data (server-enforced). Printable via the
+// `end_day` pdfme template (components/print-end-day), the same design/print path
+// as receipts - so a hospital with no end_day design gets no Print button.
 
 const EVERYONE = "everyone";
 
@@ -208,7 +209,7 @@ export function DailyReportView({
             Today
           </Button>
           {printable ? (
-            <Button type="button" size="sm" onClick={() => printEndDay(dayIso)}>
+            <Button type="button" size="sm" onClick={() => printEndDay(dayIso, subject)}>
               <Printer className="size-4" aria-hidden />
               Print
             </Button>

@@ -110,6 +110,18 @@ export function ConsultationFlow({
   const confirmingRef = useRef(false);
   const validPhone = PHONE_RE.test(phone);
 
+  // Doctor picker as a searchable dropdown (a clinic can have a dozen-plus
+  // doctors, so cards don't scale). The fee shows as the right-aligned hint and
+  // the department folds into the search; the full fee/validity summary renders
+  // below once one is chosen.
+  const doctorOptions: ComboboxOption[] = doctors.map((d) => ({
+    value: d.id,
+    label: d.name,
+    hint: `₹${formatPaise(d.fee_paise)}`,
+    keywords: d.department ?? "",
+  }));
+  const selectedDoctor = doctorId ? doctors.find((d) => d.id === doctorId) ?? null : null;
+
   // Live, debounced exact-phone lookup. A new phone resets everything downstream.
   useEffect(() => {
     setSelected(null);
@@ -435,40 +447,30 @@ export function ConsultationFlow({
               No doctors available right now. Check Doctors for status/leave, or add one.
             </p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {doctors.map((d) => {
-                const sel = doctorId === d.id;
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setDoctorId(d.id)}
-                    aria-pressed={sel}
-                    className={cn(
-                      "rounded-xl border p-3 text-left transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      sel ? "border-primary bg-accent" : "hover:border-foreground/20 hover:bg-muted/40",
-                    )}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Avatar text={initials(d.name)} active={sel} />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{d.name}</div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {d.department ?? "-"}
-                        </div>
-                      </div>
+            <>
+              <Combobox
+                options={doctorOptions}
+                value={doctorId ?? ""}
+                onChange={(v) => setDoctorId(v || null)}
+                ariaLabel="Doctor"
+                placeholder="Search and select a doctor…"
+                searchPlaceholder="Search by name or department…"
+              />
+              {selectedDoctor ? (
+                <div className="mt-3 flex items-center gap-2.5 rounded-xl border bg-muted/20 px-3.5 py-2.5">
+                  <Avatar text={initials(selectedDoctor.name)} active />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-foreground">{selectedDoctor.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {selectedDoctor.department ?? "-"} · {selectedDoctor.revisit_validity_days}-day validity
                     </div>
-                    <div className="mt-2.5 flex items-center justify-between border-t pt-2.5">
-                      <span className="text-xs text-muted-foreground">
-                        {d.revisit_validity_days}-day validity
-                      </span>
-                      <span className="text-sm font-bold text-foreground">₹{formatPaise(d.fee_paise)}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-foreground">
+                    ₹{formatPaise(selectedDoctor.fee_paise)}
+                  </span>
+                </div>
+              ) : null}
+            </>
           )}
         </StepCard>
       ) : null}

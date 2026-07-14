@@ -11,6 +11,7 @@
     "migrate:status": "node --env-file=.env scripts/migrate.mjs --status",
     "seed:doctors": "node --env-file=.env scripts/seed-doctors.mjs",
     "seed:services": "node --env-file=.env scripts/seed-services.mjs",
+    "seed:demo": "node --env-file=.env scripts/seed-demo.mjs",
     "test": "vitest run"
   },
   "dependencies": {

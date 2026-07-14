@@ -22,8 +22,10 @@ import {
   getUserLocationId,
   getUserRoleActive,
   getUserAuthz,
+  getSupervisorCandidate,
   activeAdminCount,
 } from "./repository";
+import { PIN_ROLES } from "./schema";
 
 // admin ⇒ every permission implicitly (plan B-3), so we never store redundant
 // grants on an admin row - the effective grant set for an admin is always empty.
@@ -38,6 +40,26 @@ function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((x) => set.has(x));
+}
+
+// Validate an assigned supervisor against DB state (never the client): "" ⇒ no
+// supervisor (null); otherwise the id must be an ACTIVE supervisor/admin and not
+// the user themselves. Returns the normalised id (or null), or a field error to
+// surface under the `supervisorId` control. `selfId` is null when creating.
+async function resolveSupervisorId(
+  supervisorId: string | undefined,
+  selfId: string | null,
+): Promise<{ ok: true; value: string | null } | { ok: false; message: string }> {
+  const id = supervisorId?.trim();
+  if (!id) return { ok: true, value: null };
+  if (selfId && id === selfId) {
+    return { ok: false, message: "A user can't be their own supervisor." };
+  }
+  const candidate = await getSupervisorCandidate(id);
+  if (!candidate || !candidate.active || !PIN_ROLES.includes(candidate.role)) {
+    return { ok: false, message: "Choose an active supervisor or admin." };
+  }
+  return { ok: true, value: id };
 }
 
 // Server Actions for staff-account management (plan §5). Each mirrors login's
@@ -86,6 +108,11 @@ export async function createUserAction(input: unknown): Promise<ActionResult<{ i
     return { ok: false, formError: "Could not resolve your location. Please sign in again." };
   }
 
+  const supervisor = await resolveSupervisorId(v.supervisorId, null);
+  if (!supervisor.ok) {
+    return { ok: false, fieldErrors: { supervisorId: supervisor.message } };
+  }
+
   const password_hash = await hashPassword(v.password);
   const pin_hash = v.pin ? await hashPassword(v.pin) : null;
 
@@ -99,6 +126,7 @@ export async function createUserAction(input: unknown): Promise<ActionResult<{ i
       password_hash,
       pin_hash,
       permissions: effectivePermissions(v.role, v.permissions),
+      supervisor_id: supervisor.value,
       location_id: locationId,
     }));
   } catch (err) {
@@ -147,6 +175,11 @@ export async function updateUserAction(input: unknown): Promise<ActionResult> {
     };
   }
 
+  const supervisor = await resolveSupervisorId(v.supervisorId, v.id);
+  if (!supervisor.ok) {
+    return { ok: false, fieldErrors: { supervisorId: supervisor.message } };
+  }
+
   const nextPermissions = effectivePermissions(v.role, v.permissions);
   const permissionsChanged = !sameSet(current.permissions, nextPermissions);
 
@@ -158,6 +191,7 @@ export async function updateUserAction(input: unknown): Promise<ActionResult> {
       email: v.email || null,
       role: v.role,
       permissions: nextPermissions,
+      supervisor_id: supervisor.value,
     });
   } catch (err) {
     const fieldErrors = uniqueViolationFields(err);

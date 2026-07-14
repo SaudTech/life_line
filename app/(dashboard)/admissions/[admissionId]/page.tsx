@@ -17,14 +17,11 @@ export const metadata: Metadata = {
 // expense picker (catalog-only expenses, server-re-priced on add).
 export default async function AdmissionDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ admissionId: string }>;
-  searchParams: Promise<{ admitted?: string }>;
 }) {
   const session = await requireRole(["admin", "op_ip_desk", "supervisor"]);
   const { admissionId } = await params;
-  const { admitted } = await searchParams;
   const [detail, services, locationId] = await Promise.all([
     getAdmissionDetail(admissionId),
     listActiveServices(),
@@ -41,13 +38,10 @@ export default async function AdmissionDetailPage({
         hasPrintableTemplate("advance", locationId),
       ])
     : [false, false];
-  // ?admitted=1 (set by the admit flow's redirect) shows a one-time "just
-  // admitted" banner with the advance-receipt print.
   return (
     <AdmissionDetailView
       detail={detail}
       services={services}
-      justAdmitted={admitted === "1"}
       invoicePrintable={invoicePrintable}
       advancePrintable={advancePrintable}
     />

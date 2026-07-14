@@ -65,6 +65,16 @@ export const removeExpenseSchema = z.object({
 });
 export type RemoveExpenseValues = z.infer<typeof removeExpenseSchema>;
 
+// Adjust the quantity of an existing catalog expense. Like adding, the price is
+// NEVER client-supplied - the server re-prices the item from its current catalog
+// price and recomputes quantity × price. Same quantity cap as addExpenseSchema.
+export const updateExpenseSchema = z.object({
+  admissionId: id,
+  expenseId: id,
+  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1.").max(9999, "Quantity is too large."),
+});
+export type UpdateExpenseValues = z.infer<typeof updateExpenseSchema>;
+
 // Discharge: confirm the room (rate/day + days) + collect the settlement. Discount
 // is EITHER a percentage OR a flat rupee amount (percent wins if both given); the
 // server re-derives every paise value and requires a supervisor PIN for any discount.

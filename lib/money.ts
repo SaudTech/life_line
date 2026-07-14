@@ -35,3 +35,11 @@ export function formatPaise(paise: number | string): string {
     maximumFractionDigits: 2,
   });
 }
+
+// Same as formatPaise but with the rupee symbol: 25000 → "₹250.00". Used where the
+// amount is rendered on its own (printed receipts/reports, where there's no
+// separate ₹ in the layout). On-screen the UI prepends ₹ itself; this is the one
+// helper the print documents use so the symbol is consistent everywhere.
+export function formatRupees(paise: number | string): string {
+  return `₹${formatPaise(paise)}`;
+}

@@ -1,4 +1,4 @@
-import { formatPaise } from "@/lib/money";
+import { formatRupees } from "@/lib/money";
 import { roleTitle } from "@/lib/nav";
 import {
   getActivityCounts,
@@ -16,10 +16,12 @@ import type { EndDayDocument } from "./bill-document";
 // sums, no balances) - it reads the shaped figures and maps them to the end_day
 // field keys + table rows (dev-rules §2/§4).
 //
-// SELF-SCOPED: the caller passes session.sub as `userId` and the clinic day; the
-// PDF route forces that (never a userId from the client), exactly like the on-screen
-// daily report (§4b). One user's own day, one location - the shaper is location- and
-// user-scoped by the same queries the report page uses.
+// SUBJECT-SCOPED: the caller passes the signed-in viewer (for the letterhead
+// context + location) AND the resolved report subject - a specific staff member's
+// id, or `null` for the whole-hospital total. The PDF ROUTE decides the subject
+// under the same role rules as the on-screen report (a non-admin is forced to
+// themselves; an admin may pick "everyone" or any staff member at their location),
+// so the printed sheet matches exactly what is on screen (§4b).
 
 // Human date for the sheet header, e.g. "Saturday, 11 July 2026". Built on a UTC
 // instant so no offset nudges the day (the ISO already IS the clinic day) - mirrors
@@ -49,19 +51,32 @@ function generatedAtLabel(): string {
 }
 
 export async function getEndDayDocument(
-  userId: string,
+  viewerId: string,
   day: string,
+  // The resolved report subject: a specific staff id, or `null` for the whole
+  // hospital. The route authorizes this before calling (a non-admin only ever gets
+  // their own id here).
+  subjectUserId: string | null,
 ): Promise<EndDayDocument> {
-  const ctx = await getReportContext(userId);
+  const ctx = await getReportContext(viewerId);
   if (!ctx) throw new Error("Could not resolve the report context for this user.");
 
-  // Role for the "name · role" header line, resolved within the viewer's own
-  // location (getSubjectUser is location-scoped). Missing → just the name.
-  const subject = await getSubjectUser(userId, ctx.locationId);
+  // The "name · role" header line. For a specific subject, resolve their name+role
+  // within the viewer's location (getSubjectUser is location-scoped). For the
+  // whole-hospital total there is no single person, so label it as such.
+  let staffNameRole: string;
+  if (subjectUserId === null) {
+    staffNameRole = "All staff · Hospital total";
+  } else {
+    const subject = await getSubjectUser(subjectUserId, ctx.locationId);
+    staffNameRole = subject ? `${subject.name} · ${roleTitle(subject.role)}` : ctx.viewerName;
+  }
 
+  // Scope every figure to the subject (null → whole hospital), the same queries the
+  // on-screen report uses.
   const [activityCounts, money] = await Promise.all([
-    getActivityCounts(userId, day, day, ctx.locationId),
-    getMoneySummary(userId, day, day, ctx.locationId),
+    getActivityCounts(subjectUserId, day, day, ctx.locationId),
+    getMoneySummary(subjectUserId, day, day, ctx.locationId),
   ]);
   const report = shapeDailyReport(activityCounts, money);
 
@@ -75,29 +90,29 @@ export async function getEndDayDocument(
     locationId: ctx.locationId,
     hospitalName: ctx.hospitalName,
     reportDateText: formatDayLabel(day),
-    staffNameRole: subject ? `${subject.name} · ${roleTitle(subject.role)}` : ctx.viewerName,
+    staffNameRole,
     generatedAtText: generatedAtLabel(),
-    grandTotalText: formatPaise(report.collectedTotalPaise),
+    grandTotalText: formatRupees(report.collectedTotalPaise),
     billsCountText: String(report.collectedCount),
-    cashTotalText: formatPaise(modeTotal("cash")),
-    cardTotalText: formatPaise(modeTotal("card")),
-    upiTotalText: formatPaise(modeTotal("upi")),
-    otherTotalText: formatPaise(modeTotal("other")),
-    discountsText: formatPaise(report.discountOnMyBillsPaise),
-    discountsApprovedText: `${formatPaise(report.discountsApproved.totalPaise)} (${report.discountsApproved.count})`,
-    voidsText: `${formatPaise(report.voids.totalPaise)} (${report.voids.count})`,
-    advancesText: formatPaise(report.advancesTotalPaise),
+    cashTotalText: formatRupees(modeTotal("cash")),
+    cardTotalText: formatRupees(modeTotal("card")),
+    upiTotalText: formatRupees(modeTotal("upi")),
+    otherTotalText: formatRupees(modeTotal("other")),
+    discountsText: formatRupees(report.discountOnMyBillsPaise),
+    discountsApprovedText: `${formatRupees(report.discountsApproved.totalPaise)} (${report.discountsApproved.count})`,
+    voidsText: `${formatRupees(report.voids.totalPaise)} (${report.voids.count})`,
+    advancesText: formatRupees(report.advancesTotalPaise),
     advancesCountText: String(report.advancesCount),
     activityTotalText: String(report.activityTotal),
     modeRows: report.byMode.map((l) => ({
       mode: l.label,
       count: String(l.count),
-      amountText: formatPaise(l.totalPaise),
+      amountText: formatRupees(l.totalPaise),
     })),
     typeRows: report.byType.map((l) => ({
       label: l.label,
       count: String(l.count),
-      amountText: formatPaise(l.totalPaise),
+      amountText: formatRupees(l.totalPaise),
     })),
     activityRows: report.activity.map((a) => ({
       label: a.label,

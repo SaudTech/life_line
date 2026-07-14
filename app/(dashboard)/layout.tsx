@@ -23,6 +23,7 @@ export default async function DashboardLayout({
         name={profile?.name ?? "Staff"}
         phone={profile?.phone ?? null}
         email={profile?.email ?? null}
+        supervisorName={profile?.supervisor_name ?? null}
       />
       <main className="flex-1 p-6">{children}</main>
       <Toaster />

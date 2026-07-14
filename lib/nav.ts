@@ -18,7 +18,7 @@ export interface NavItem {
 export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Dashboard" },
-    { href: "/admin/users", label: "Users" },
+    { href: "/admin/users", label: "Staff" },
     { href: "/admin/doctors", label: "Doctors" },
     { href: "/admin/services", label: "Services" },
     { href: "/patients", label: "Patients" },
@@ -26,7 +26,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/procedures", label: "Procedures" },
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "Reports" },
-    { href: "/admin/receipts", label: "Receipt Designs" },
+    { href: "/admin/receipts", label: "Receipt Templates" },
   ],
   // Supervisors approve discounts/voids inline (PIN) AND work the full counter -
   // OP consultations, procedures and IP admit/discharge, same as op_ip_desk. Each

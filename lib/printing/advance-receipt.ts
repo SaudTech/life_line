@@ -1,4 +1,4 @@
-import { formatPaise } from "@/lib/money";
+import { formatRupees } from "@/lib/money";
 import { amountInWords } from "./amount-in-words";
 
 // PURE render-model + input mapping for the A4 "Advance Deposit Receipt" (plan
@@ -80,7 +80,7 @@ export function buildAdvanceReceiptDocument(core: AdvanceReceiptCore): AdvanceRe
       ageGender: ageGenderText(core.patientAge, core.patientGender),
       phone: core.patientPhone ?? undefined,
     },
-    advanceText: formatPaise(core.advancePaise),
+    advanceText: formatRupees(core.advancePaise),
     advanceInWords: amountInWords(core.advancePaise),
     paymentModeLabel: core.paymentMode ? PAYMENT_MODE_LABELS[core.paymentMode] : undefined,
     footerNote: core.footerNote ?? undefined,
