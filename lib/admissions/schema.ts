@@ -65,12 +65,16 @@ export const removeExpenseSchema = z.object({
 });
 export type RemoveExpenseValues = z.infer<typeof removeExpenseSchema>;
 
-// Adjust the quantity of an existing catalog expense. Like adding, the price is
+// Adjust an existing catalog expense - its quantity and/or which catalog service
+// it is (a tally line stays editable until discharge, so a mis-picked service is
+// corrected in place rather than deleted and re-added). Like adding, the price is
 // NEVER client-supplied - the server re-prices the item from its current catalog
 // price and recomputes quantity × price. Same quantity cap as addExpenseSchema.
+// serviceId omitted = keep the line's current service, change quantity only.
 export const updateExpenseSchema = z.object({
   admissionId: id,
   expenseId: id,
+  serviceId: id.optional(),
   quantity: z.coerce.number().int().min(1, "Quantity must be at least 1.").max(9999, "Quantity is too large."),
 });
 export type UpdateExpenseValues = z.infer<typeof updateExpenseSchema>;

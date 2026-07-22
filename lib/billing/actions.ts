@@ -50,7 +50,7 @@ export async function voidBillAction(input: unknown): Promise<ActionResult<VoidO
 
   // Supervisor authorization - same pattern as discount approval. scrypt is
   // salted per row, so findApproverByPin tries every active approver's hash.
-  const approver = await findApproverByPin(v.pin);
+  const approver = await findApproverByPin(v.pin, locationId);
   if (!approver) {
     await logFailedPinAttempt({ actorId: s.sub, locationId, context: "void" });
     return { ok: false, fieldErrors: { pin: "PIN not recognised." } };

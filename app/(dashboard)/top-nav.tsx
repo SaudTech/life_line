@@ -4,8 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, ChevronDown, LogOut, Mail, Menu, Phone, UserRound } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, Mail, Menu, Phone, UserRound } from "lucide-react";
 import { logoutAction } from "@/lib/auth/actions";
+import { ChangePasswordDialog } from "./change-password-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,8 +62,8 @@ function countVisibleNavItems(
 }
 
 // The signed-in shell's one horizontal bar (single top bar, no sidebar,
-// light-only). Brand + role-aware nav on the left, notifications + the signed-in
-// user on the right. The bar stays a single line at every width - below md the
+// light-only). Brand + role-aware nav on the left, the signed-in user on the
+// right. The bar stays a single line at every width - below md the
 // primary nav collapses behind a hamburger button that opens the same links in
 // a slide-out sheet, so nothing wraps or clips on a phone.
 // Display only - the server still gates every route (§8); the nav merely
@@ -82,8 +83,16 @@ export function TopNav({
 }) {
   const pathname = usePathname();
   const items = navItemsForRole(role);
-  const firstReal = items.find((i) => !i.disabled)?.href ?? "/";
+  // The brand links to this role's first nav item - its landing page. "/" only
+  // when the role has no links at all (unknown role).
+  const firstReal = items[0]?.href ?? "/";
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Account popover + the self-service "Change password" dialog it opens. The
+  // popover is controlled so choosing the action closes it cleanly before the
+  // dialog takes focus (otherwise both stay open, stacked).
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
 
   // Overflow ("More links") for md+ widths where the hamburger is hidden but
   // the bar is still too narrow to lay out every item on one line. A hidden
@@ -142,23 +151,11 @@ export function TopNav({
 
   const visibleItems = items.slice(0, visibleCount);
   const overflowItems = items.slice(visibleCount);
-  const overflowHasActive = overflowItems.some(
-    (item) => !item.disabled && isActive(pathname, item.href, items),
+  const overflowHasActive = overflowItems.some((item) =>
+    isActive(pathname, item.href, items),
   );
 
   const navLink = (item: NavItem, onNavigate?: () => void) => {
-    if (item.disabled) {
-      return (
-        <span
-          key={item.label}
-          aria-disabled="true"
-          title="Coming soon"
-          className="cursor-default rounded-[9px] px-3 py-2 text-[13px] font-semibold text-muted-foreground/60 select-none"
-        >
-          {item.label}
-        </span>
-      );
-    }
     const active = isActive(pathname, item.href, items);
     return (
       <Link
@@ -254,36 +251,25 @@ export function TopNav({
                   onMouseEnter={openMoreNow}
                   onMouseLeave={scheduleMoreClose}
                 >
-                  {overflowItems.map((item) =>
-                    item.disabled ? (
-                      <div
-                        key={item.label}
-                        aria-disabled="true"
-                        title="Coming soon"
-                        className="cursor-default rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground/60 select-none"
+                  {overflowItems.map((item) => (
+                    <DropdownMenuItem key={item.href} asChild>
+                      <Link
+                        href={item.href}
+                        aria-current={
+                          isActive(pathname, item.href, items)
+                            ? "page"
+                            : undefined
+                        }
+                        className={cn(
+                          "font-medium",
+                          isActive(pathname, item.href, items) &&
+                            "bg-accent text-accent-foreground",
+                        )}
                       >
                         {item.label}
-                      </div>
-                    ) : (
-                      <DropdownMenuItem key={item.href} asChild>
-                        <Link
-                          href={item.href}
-                          aria-current={
-                            isActive(pathname, item.href, items)
-                              ? "page"
-                              : undefined
-                          }
-                          className={cn(
-                            "font-medium",
-                            isActive(pathname, item.href, items) &&
-                              "bg-accent text-accent-foreground",
-                          )}
-                        >
-                          {item.label}
-                        </Link>
-                      </DropdownMenuItem>
-                    ),
-                  )}
+                      </Link>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </div>
             </DropdownMenu>
@@ -327,19 +313,9 @@ export function TopNav({
 
         {/* Right cluster - stays on the top line beside the brand on every width */}
         <div className="ml-auto flex flex-none items-center gap-3">
-          {/* Notifications */}
-          <button
-            type="button"
-            title="Notifications"
-            aria-label="Notifications"
-            className="flex size-9 items-center justify-center rounded-[9px] border border-input bg-card text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Bell className="size-4" aria-hidden />
-          </button>
-
           {/* Signed-in user - avatar opens a basic-info popover with sign out */}
           <div className="flex items-center border-l pl-3">
-            <Popover>
+            <Popover open={accountOpen} onOpenChange={setAccountOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
@@ -394,8 +370,19 @@ export function TopNav({
                   </div>
                 )}
 
-                {/* Sign out */}
+                {/* Account actions - change own password, sign out */}
                 <div className="border-t p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setPwOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <KeyRound className="size-4" aria-hidden />
+                    Change password
+                  </button>
                   <form action={logoutAction}>
                     <button
                       type="submit"
@@ -411,6 +398,9 @@ export function TopNav({
           </div>
         </div>
       </div>
+
+      {/* Self-service password change - any signed-in staff member, own account only */}
+      {pwOpen ? <ChangePasswordDialog onClose={() => setPwOpen(false)} /> : null}
     </header>
   );
 }

@@ -168,11 +168,18 @@ export async function authorizeDiscountAction(input: {
   if (discountPaise <= 0) {
     return { ok: false, formError: "Enter a discount percentage or amount." };
   }
-  const approver = await findApproverByPin(pinParsed.data.pin);
+  // Resolved before the PIN check, not inside the failure log: the approver lookup is
+  // SCOPED to this location, so only a supervisor at this branch can authorize this
+  // branch's discount (§8).
+  const locationId = await getUserLocationId(s.sub);
+  if (!locationId) {
+    return { ok: false, formError: "Could not resolve your location. Please sign in again." };
+  }
+  const approver = await findApproverByPin(pinParsed.data.pin, locationId);
   if (!approver) {
     await logFailedPinAttempt({
       actorId: s.sub,
-      locationId: await getUserLocationId(s.sub),
+      locationId,
       context: "consultation",
     });
     return { ok: false, fieldErrors: { pin: "PIN not recognised." } };
@@ -324,7 +331,7 @@ export async function startConsultationAction(
     if (!v.discountPin) {
       return { ok: false, fieldErrors: { discountPin: "A supervisor PIN is required for a discount." } };
     }
-    const approver = await findApproverByPin(v.discountPin);
+    const approver = await findApproverByPin(v.discountPin, locationId);
     if (!approver) {
       await logFailedPinAttempt({ actorId: s.sub, locationId, context: "consultation" });
       return { ok: false, fieldErrors: { discountPin: "PIN not recognised." } };

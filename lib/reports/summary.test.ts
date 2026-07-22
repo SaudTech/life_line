@@ -134,3 +134,77 @@ describe("shapeDailyReport", () => {
     expect(voided.tone).toBe("danger");
   });
 });
+
+// Money in = bills collected + advances taken, both already net of refunds. This is
+// the figure that must equal what the admin dashboard reports for the same day
+// (lib/money-in.ts). The bug these defend: advances were listed separately AND left
+// inside the IP bill's total, so any attempt to reconcile the drawer double-counted
+// every deposit.
+describe("shapeDailyReport money-in reconciliation", () => {
+  it("adds advances to collected bills for the drawer total", () => {
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByMode: [{ key: "cash", count: 3, totalPaise: 500000 }],
+      advancesByMode: [{ key: "cash", count: 1, totalPaise: 1000000 }],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.collectedTotalPaise).toBe(500000); // bills only
+    expect(r.advancesTotalPaise).toBe(1000000); // deposits only
+    expect(r.moneyInTotalPaise).toBe(1500000); // what the till holds
+  });
+
+  it("money in equals collected when no advances were taken", () => {
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByMode: [{ key: "upi", count: 2, totalPaise: 320000 }],
+    };
+    const r = shapeDailyReport([], money);
+    expect(r.moneyInTotalPaise).toBe(r.collectedTotalPaise);
+  });
+
+  it("subtracts refunds exactly once - the by-mode lines are gross of them", () => {
+    // The repository sums billCollectedSql (money TAKEN), so a refund is not netted out
+    // upstream any more: this shaper is the single place it leaves the drawer.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByMode: [{ key: "cash", count: 1, totalPaise: 100000 }],
+      refunds: { count: 1, totalPaise: 400000 },
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.collectedTotalPaise).toBe(100000); // gross - what was taken
+    expect(r.refunds).toEqual({ count: 1, totalPaise: 400000 });
+    expect(r.moneyInTotalPaise).toBe(-300000); // 1,000 in, 4,000 back out
+  });
+
+  it("reconciles a stay: advance in, refund back out, net = the bill", () => {
+    // The real 14 Jul case that exposed the old decomposition. Billed ₹18,000 against a
+    // ₹20,000 advance, both on one clinic day: ₹0 collected at discharge, ₹20,000 in,
+    // ₹2,000 back out. Money in must be the ₹18,000 the hospital actually kept.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "ip", count: 1, totalPaise: 0 }], // balance due, not gross
+      billsByMode: [{ key: "cash", count: 1, totalPaise: 0 }],
+      advancesByMode: [{ key: "cash", count: 1, totalPaise: 2000000 }],
+      refunds: { count: 1, totalPaise: 200000 },
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.advancesTotalPaise).toBe(2000000);
+    expect(r.refunds.totalPaise).toBe(200000);
+    expect(r.moneyInTotalPaise).toBe(1800000); // exactly the ₹18,000 bill
+  });
+
+  it("a day whose ONLY event was a refund is not empty", () => {
+    // Cash left the drawer. A sheet claiming "nothing happened" would hide it (§4).
+    const r = shapeDailyReport([], { ...emptyMoneyRaw(), refunds: { count: 1, totalPaise: 400000 } });
+    expect(r.isEmpty).toBe(false);
+  });
+
+  it("an empty day reports zero money in and no refunds", () => {
+    const r = shapeDailyReport([], emptyMoneyRaw());
+    expect(r.moneyInTotalPaise).toBe(0);
+    expect(r.refunds).toEqual({ count: 0, totalPaise: 0 });
+  });
+});

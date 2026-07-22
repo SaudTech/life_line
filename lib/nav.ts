@@ -7,14 +7,10 @@ import type { Role } from "@/lib/users/schema";
 export interface NavItem {
   href: string;
   label: string;
-  // Shown in the bar but not yet a real page. Rendered muted and non-clickable
-  // so the nav matches the intended shape without ever linking to a 404 (§2).
-  disabled?: boolean;
 }
 
-// Only /admin and /admin/users are real today; the rest are visible placeholders
-// (disabled) so the bar reads as the finished product. Flip `disabled` and point
-// `href` at the route as each page lands.
+// Every item points at a real, shipped route - the bar never renders a link to a
+// page that doesn't exist. Add an item here only once its route lands.
 export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Dashboard" },
@@ -100,8 +96,8 @@ export function initials(name: string): string {
 // True when `href` is the deepest nav item matching the current path. Exact match
 // always counts; a section root (e.g. /admin) matches its descendants ONLY when no
 // longer item href also matches - so on /admin/users the "Users" item wins and
-// "Dashboard" (/admin) stays inactive (plan §4C). Disabled/placeholder items
-// (href "#") never match a real path.
+// "Dashboard" (/admin) stays inactive (plan §4C). A non-route href ("#") never
+// matches a real path.
 export function isActive(
   pathname: string,
   href: string,

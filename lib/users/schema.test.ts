@@ -4,6 +4,8 @@ import {
   updateUserSchema,
   resetPasswordSchema,
   resetPasswordFormSchema,
+  changeOwnPasswordSchema,
+  changeOwnPasswordFormSchema,
   setPinSchema,
   setPinFormSchema,
   ROLES,
@@ -179,6 +181,107 @@ describe("resetPasswordFormSchema (confirm-twice)", () => {
 
   it("still enforces the 8-char minimum", () => {
     const r = resetPasswordFormSchema.safeParse({
+      password: "short12",
+      confirmPassword: "short12",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("changeOwnPasswordSchema (self-service)", () => {
+  it("accepts a current password plus a valid new one", () => {
+    const r = changeOwnPasswordSchema.safeParse({
+      currentPassword: "oldpass99",
+      password: "newpass99",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("has no id field (the target is always the session user)", () => {
+    const r = changeOwnPasswordSchema.safeParse({
+      currentPassword: "oldpass99",
+      password: "newpass99",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect("id" in r.data).toBe(false);
+  });
+
+  it("rejects an empty current password", () => {
+    const r = changeOwnPasswordSchema.safeParse({
+      currentPassword: "",
+      password: "newpass99",
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find((i) => i.path[0] === "currentPassword");
+      expect(issue?.message).toBe("Enter your current password.");
+    }
+  });
+
+  it("rejects a new password under 8 characters (boundary)", () => {
+    const r = changeOwnPasswordSchema.safeParse({
+      currentPassword: "oldpass99",
+      password: "short12",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a new password identical to the current one", () => {
+    const r = changeOwnPasswordSchema.safeParse({
+      currentPassword: "samepass9",
+      password: "samepass9",
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find((i) => i.path[0] === "password");
+      expect(issue?.message).toBe(
+        "New password must be different from the current one.",
+      );
+    }
+  });
+});
+
+describe("changeOwnPasswordFormSchema (confirm-twice)", () => {
+  const base = {
+    currentPassword: "oldpass99",
+    password: "newpass99",
+    confirmPassword: "newpass99",
+  };
+
+  it("accepts matching new passwords", () => {
+    expect(changeOwnPasswordFormSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects mismatched passwords on confirmPassword", () => {
+    const r = changeOwnPasswordFormSchema.safeParse({
+      ...base,
+      confirmPassword: "newpass98",
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find((i) => i.path[0] === "confirmPassword");
+      expect(issue?.message).toBe("Passwords do not match.");
+    }
+  });
+
+  it("rejects reusing the current password even when both copies match", () => {
+    const r = changeOwnPasswordFormSchema.safeParse({
+      currentPassword: "samepass9",
+      password: "samepass9",
+      confirmPassword: "samepass9",
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find((i) => i.path[0] === "password");
+      expect(issue?.message).toBe(
+        "New password must be different from the current one.",
+      );
+    }
+  });
+
+  it("still enforces the 8-char minimum", () => {
+    const r = changeOwnPasswordFormSchema.safeParse({
+      currentPassword: "oldpass99",
       password: "short12",
       confirmPassword: "short12",
     });

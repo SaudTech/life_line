@@ -31,6 +31,10 @@ const DATE_FMT = new Intl.DateTimeFormat("en-IN", {
 
 export interface CardProps {
   user: UserListRow;
+  // This row is the signed-in admin's own account. Hides the status action: the
+  // server rejects self-deactivation (lib/users/actions.ts), so offering it can
+  // only ever produce an error. UI convenience, not the check itself (§8).
+  isSelf: boolean;
   statusPending: boolean;
   onEdit: () => void;
   onReset: () => void;
@@ -54,6 +58,7 @@ export function useDerived(user: UserListRow) {
 // no matter how many actions a role has.
 export function Actions({
   user,
+  isSelf,
   isPinRole,
   statusPending,
   onEdit,
@@ -89,11 +94,15 @@ export function Actions({
               {user.has_pin ? "Change PIN" : "Set PIN"}
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onStatus} variant={user.active ? "destructive" : "default"}>
-            {user.active ? <UserX aria-hidden /> : <UserCheck aria-hidden />}
-            {statusPending ? "…" : user.active ? "Deactivate" : "Reactivate"}
-          </DropdownMenuItem>
+          {isSelf ? null : (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={onStatus} variant={user.active ? "destructive" : "default"}>
+                {user.active ? <UserX aria-hidden /> : <UserCheck aria-hidden />}
+                {statusPending ? "…" : user.active ? "Deactivate" : "Reactivate"}
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

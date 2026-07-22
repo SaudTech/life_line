@@ -1,5 +1,6 @@
 import { pool } from "@/lib/db";
 import type { IsoDay } from "@/lib/consultations/rules";
+import { billCollectedSql, clinicRange, toPaise } from "@/lib/money-in";
 import {
   emptyMoneyRaw,
   type ActivityCountRow,
@@ -24,13 +25,9 @@ import {
 //   [ from 00:00 IST , (to + 1) 00:00 IST )
 // built with `AT TIME ZONE 'Asia/Kolkata'` so the boundary is correct regardless
 // of the DB session timezone, and index-friendly (no per-row function on the column).
-
-// The half-open clinic-day range predicate for a timestamptz column, using the
-// given 1-based parameter indices for the inclusive from/to ISO days.
-function clinicRange(col: string, fromParam: number, toParam: number): string {
-  return `${col} >= ($${fromParam}::date)::timestamp AT TIME ZONE 'Asia/Kolkata'
-      AND ${col} <  (($${toParam}::date + 1))::timestamp AT TIME ZONE 'Asia/Kolkata'`;
-}
+// `clinicRange` and the money-in expression both come from lib/money-in.ts - the ONE
+// definition this screen and the admin dashboard share, so they cannot report
+// different totals for the same day (they used to; see migration 0018).
 
 // Counts of meaningful actions in the range (the activity summary, §3A). Grouped by
 // action tag; the shaper keeps only the curated, unambiguous tags and labels them
@@ -54,13 +51,6 @@ export async function getActivityCounts(
   return rows;
 }
 
-// Read a BIGINT sum pg returns as text into an integer. A single day's total is far
-// below Number.MAX_SAFE_INTEGER, so this stays exact (never a float in the money
-// path - it's only bridging pg's text BIGINT into JS, §1).
-function toPaise(v: string | null): number {
-  return v == null ? 0 : Number(v);
-}
-
 // The full money summary for the day (§3B), as raw grouped rows for the pure
 // shaper. Figures are attributed by column: revenue by created_by (final only),
 // discounts approved by discount_approved_by, voids by voided_by, advance deposits
@@ -80,9 +70,20 @@ export async function getMoneySummary(
   // and 'void' isn't revenue - so neither belongs in the reconciliation total (§3).
   // A finalized bill always has a mode, but COALESCE guards a stray null so its
   // money never silently drops out of the by-mode line.
+  //
+  // These are COLLECTED figures, so an IP bill contributes the balance taken at
+  // discharge, not its gross total (which still contains the advance that this sheet
+  // already lists under advancesByMode). This sheet is a CASH HANDOVER: every line
+  // must be money that passed through the drawer on this clinic day, or the count
+  // won't tie out at close (lib/money-in.ts).
+  //
+  // billCollectedSql, NOT billMoneyInSql: money TAKEN only. A refund is cash going the
+  // other way and gets its own subtracted line on the sheet (shapeDailyReport), because
+  // netting it in here made an IP row read "-₹2,000" for a stay that was billed ₹18,000
+  // against a ₹20,000 advance. The day's money-in is identical either way.
   const billsByType = pool.query<{ key: string; count: number; total_paise: string }>(
     `SELECT type AS key, count(*)::int AS count,
-            COALESCE(sum(total_paise), 0)::bigint AS total_paise
+            COALESCE(sum(${billCollectedSql()}), 0)::bigint AS total_paise
        FROM bills
       WHERE ($1::uuid IS NULL OR created_by = $1) AND location_id = $4 AND status = 'final'
         AND ${clinicRange("created_at", 2, 3)}
@@ -91,7 +92,7 @@ export async function getMoneySummary(
   );
   const billsByMode = pool.query<{ key: string; count: number; total_paise: string }>(
     `SELECT COALESCE(payment_mode, 'other') AS key, count(*)::int AS count,
-            COALESCE(sum(total_paise), 0)::bigint AS total_paise
+            COALESCE(sum(${billCollectedSql()}), 0)::bigint AS total_paise
        FROM bills
       WHERE ($1::uuid IS NULL OR created_by = $1) AND location_id = $4 AND status = 'final'
         AND ${clinicRange("created_at", 2, 3)}
@@ -143,13 +144,29 @@ export async function getMoneySummary(
     args,
   );
 
-  const [bt, bm, dm, da, vo, av] = await Promise.all([
+  // Refunds handed back at discharge (advance > final total). Cash leaving the drawer
+  // is already netted out of the by-mode lines above, so it is NOT subtracted again
+  // here - this is the visible record of an outflow that previously existed only
+  // inside an audit_log JSON blob, invisible to every screen (§4, never silently
+  // dropped).
+  const refunds = pool.query<{ count: number; total_paise: string }>(
+    `SELECT count(*)::int AS count,
+            COALESCE(sum(refund_paise), 0)::bigint AS total_paise
+       FROM bills
+      WHERE ($1::uuid IS NULL OR created_by = $1) AND location_id = $4 AND status = 'final'
+        AND refund_paise > 0
+        AND ${clinicRange("created_at", 2, 3)}`,
+    args,
+  );
+
+  const [bt, bm, dm, da, vo, av, rf] = await Promise.all([
     billsByType,
     billsByMode,
     discountMine,
     discountsApproved,
     voids,
     advancesByMode,
+    refunds,
   ]);
 
   const toGroup = (r: { key: string; count: number; total_paise: string }): MoneyGroupRow => ({
@@ -172,6 +189,10 @@ export async function getMoneySummary(
       totalPaise: toPaise(vo.rows[0]?.total_paise ?? null),
     },
     advancesByMode: av.rows.map(toGroup),
+    refunds: {
+      count: rf.rows[0]?.count ?? 0,
+      totalPaise: toPaise(rf.rows[0]?.total_paise ?? null),
+    },
   };
 }
 

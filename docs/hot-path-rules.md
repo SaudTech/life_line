@@ -60,7 +60,42 @@ the hardening review turned up.
 - Fixed layout: the total and the Save button never move.
 - Colour is status only: green = saved, amber = pending approval, red = error/void.
 
-## 8. Known gap to close in billing: idempotency
+## 8. Reporting money: one definition, and the day it lands on
+
+The counter records money; the dashboard and the daily report have to agree about what
+it recorded. They did not, and the fix is a rule, not a query.
+
+- **"Money in" is defined once, in `lib/money-in.ts`.** Both `lib/dashboard/repository.ts`
+  and `lib/reports/repository.ts` import the expression from there. Never hand-write a
+  revenue sum at a call site - that is exactly how the two screens drifted apart.
+- **Never sum `bills.total_paise` as revenue.** An IP bill's total is the GROSS bill and
+  still contains the advance taken at admit. Summing it *and* the advance counts the
+  advance twice (it inflated every admin figure by ~19% on the dev dataset). An IP bill
+  contributes `balance_due_paise − refund_paise`; every other type contributes its total.
+- **Cash moves twice in a stay, on two different clinic days:** the advance on the admit
+  day, the balance on the discharge day. Each is reckoned on the day it happened, so a
+  day's figure matches what that day's drawer actually held.
+- **A refund is money leaving.** It is stored (`bills.refund_paise`), netted out of
+  money-in, and shown as its own figure. A day's money-in may legitimately be negative.
+  Never clamp it to zero - that hides an outflow (§4).
+- **Only `status = 'final'` is money.** `pending_approval` isn't settled; `void` isn't
+  revenue. The admin ledger ("Recent invoices") still *lists* both, marked and counted
+  as zero, so an invoice is never invisible - but it reckons a row's effect with this
+  same rule, so the ledger and the cards above it can never disagree.
+- **Void accounting is an OPEN DECISION for the hospital owner - do not change it
+  silently.** Today a voided bill is revenue on **no** day: `status='final'` drops it
+  from its original day retroactively. So a day's revenue can change after the fact, and
+  a Monday sheet printed Monday will not match Monday re-read on Tuesday. The daily
+  report separately shows *what was voided*, keyed on `voided_at`.
+  The alternative (bill counts on its billed day, the void subtracts on `voided_at`)
+  never restates history and matches how the drawer physically behaved, but it is a real
+  accounting policy change and both screens would have to move together. Ask the owner;
+  whichever is chosen, `lib/money-in.ts` is the one place to implement it.
+- **`location_id` filters every reporting query**, including the ones that only *look*
+  like display (activity feeds, staff counts, approver lookups). An unscoped approver
+  list is an authorization bug, not a cosmetic one - see `listDiscountApprovers`.
+
+## 9. Known gap to close in billing: idempotency
 
 - `startConsultationAction` is not idempotent - a genuine success whose response is lost
   to a dropped connection could be re-submitted into a second booking. When the billing

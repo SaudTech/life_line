@@ -1,11 +1,21 @@
-import { IndianRupee, TrendingDown, TrendingUp, Users, type LucideIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  BedDouble,
+  IndianRupee,
+  TrendingDown,
+  TrendingUp,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { addDays, clinicToday } from "@/lib/date-range";
 import { formatPaise } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
+  getCurrentCensus,
   getDepartmentRevenue,
   getInPatientRevenue,
   getPatientCounts,
+  getPendingApprovalCount,
   getRevenueByDay,
 } from "@/lib/dashboard/repository";
 import {
@@ -104,14 +114,17 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
   const mtd = monthToDateRange(today);
   const prevMtd = prevMonthComparableRange(today);
 
-  const [rev7, revMtd, revPrevMtd, patients, deptRows, inPatientPaise] = await Promise.all([
-    getRevenueByDay(sparkStart, today, locationId),
-    getRevenueByDay(mtd.from, mtd.to, locationId),
-    getRevenueByDay(prevMtd.from, prevMtd.to, locationId),
-    getPatientCounts(today, today, locationId),
-    getDepartmentRevenue(today, today, locationId),
-    getInPatientRevenue(today, today, locationId),
-  ]);
+  const [rev7, revMtd, revPrevMtd, patients, deptRows, inPatientPaise, census, pending] =
+    await Promise.all([
+      getRevenueByDay(sparkStart, today, locationId),
+      getRevenueByDay(mtd.from, mtd.to, locationId),
+      getRevenueByDay(prevMtd.from, prevMtd.to, locationId),
+      getPatientCounts(today, today, locationId),
+      getDepartmentRevenue(today, today, locationId),
+      getInPatientRevenue(today, today, locationId),
+      getCurrentCensus(locationId),
+      getPendingApprovalCount(locationId),
+    ]);
 
   // Today card: pull today + yesterday out of the zero-filled 7-day series so the
   // sparkline and the headline figure come from one source.
@@ -134,6 +147,24 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
   ];
 
   return (
+    <>
+    {/* The only thing on this page that asks the admin to ACT. A pending bill has an
+        unapproved discount, so it cannot finalise: the money is uncollected and a
+        patient is waiting at a counter right now. Amber = pending (§5, colour is for
+        status only). Rendered only when the queue is non-empty - a permanent "0
+        pending" banner is noise staff learn to ignore. */}
+    {pending > 0 && (
+      <Link
+        href="/supervisor/bills"
+        className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4.5 py-3 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="text-sm font-semibold text-amber-900">
+          {pending} bill{pending === 1 ? "" : "s"} waiting for discount approval
+        </span>
+        <span className="text-xs font-semibold text-amber-800">Review →</span>
+      </Link>
+    )}
+
     <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_1fr_1fr] xl:grid-cols-4">
       <RevenueCard
         title="Revenue today"
@@ -177,6 +208,14 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
             </div>
           ))}
         </div>
+        {/* The live census - patients in a bed RIGHT NOW, not a figure for today.
+            Unlike every other number here it is not bounded by the clinic day, so it
+            is labelled "in hospital now" and never folded into the counts above. */}
+        <div className="mt-3 flex items-center gap-1.5 border-t pt-2.5">
+          <BedDouble className="size-3.5 flex-none text-muted-foreground" aria-hidden />
+          <span className="text-[11px] font-semibold tabular-nums text-foreground">{census}</span>
+          <span className="text-[11px] font-medium text-muted-foreground">in hospital now</span>
+        </div>
       </div>
 
       {/* Revenue by department - spans the row on xl. */}
@@ -213,5 +252,6 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
         )}
       </div>
     </div>
+    </>
   );
 }

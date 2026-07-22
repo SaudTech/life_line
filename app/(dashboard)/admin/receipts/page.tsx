@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth/dal";
 import { getUserLocationId } from "@/lib/users/repository";
 import { getActiveTemplate, listTemplates } from "@/lib/printing/repository";
-import { ReceiptsLibrary } from "./receipts-library";
+import { relativeTime } from "@/lib/admin/activity";
+import { ReceiptsLibrary, type DesignRow } from "./receipts-library";
 
 export const metadata: Metadata = {
   title: "Receipt designs - Life Line Hospital",
@@ -29,5 +30,18 @@ export default async function ReceiptsPage() {
   ]);
 
   const templates = await listTemplates(locationId);
-  return <ReceiptsLibrary templates={templates} />;
+
+  // Pre-format "Updated ..." on the server with a single server `now`, the same
+  // way the admin dashboard formats its activity rows. A client-computed `now`
+  // renders a different label than the server's → hydration mismatch.
+  const now = new Date();
+  const designs: DesignRow[] = templates.map((t) => ({
+    id: t.id,
+    name: t.name,
+    bill_type: t.bill_type,
+    is_active: t.is_active,
+    updatedLabel: relativeTime(new Date(t.updated_at), now),
+  }));
+
+  return <ReceiptsLibrary designs={designs} />;
 }

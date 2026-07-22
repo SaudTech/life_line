@@ -103,6 +103,8 @@ export async function getEndDayDocument(
     voidsText: `${formatRupees(report.voids.totalPaise)} (${report.voids.count})`,
     advancesText: formatRupees(report.advancesTotalPaise),
     advancesCountText: String(report.advancesCount),
+    moneyInText: formatRupees(report.moneyInTotalPaise),
+    refundsText: `${formatRupees(report.refunds.totalPaise)} (${report.refunds.count})`,
     activityTotalText: String(report.activityTotal),
     modeRows: report.byMode.map((l) => ({
       mode: l.label,
@@ -111,6 +113,11 @@ export async function getEndDayDocument(
     })),
     typeRows: report.byType.map((l) => ({
       label: l.label,
+      count: String(l.count),
+      amountText: formatRupees(l.totalPaise),
+    })),
+    advanceModeRows: report.advancesByMode.map((l) => ({
+      mode: l.label,
       count: String(l.count),
       amountText: formatRupees(l.totalPaise),
     })),

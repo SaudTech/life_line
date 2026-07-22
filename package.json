@@ -15,6 +15,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@expo-google-fonts/ibm-plex-mono": "0.4.1",
+    "@expo-google-fonts/inter": "0.4.2",
+    "@expo-google-fonts/merriweather": "0.4.2",
+    "@expo-google-fonts/mukta": "0.4.1",
+    "@expo-google-fonts/noto-sans": "0.4.2",
+    "@expo-google-fonts/noto-serif": "0.4.2",
+    "@expo-google-fonts/poppins": "0.4.1",
+    "@expo-google-fonts/pt-serif": "0.4.1",
     "@hookform/resolvers": "5.4.0",
     "@pdfme/common": "6.1.11",
     "@pdfme/generator": "6.1.11",
@@ -39,6 +47,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/fontkit": "2.0.9",
     "@types/node": "^20",
     "@types/pg": "8.20.0",
     "@types/react": "^19",

@@ -42,7 +42,7 @@ const STATUS_FILTER_OPTIONS: ComboboxOption[] = [
 // UI state - search, role/status filters, and which dialog is open - and filters
 // the loaded list instantly. Mutations run in the dialogs' server actions, which
 // revalidate the page so fresh `users` flow back as props.
-export function UsersManager({ users }: { users: UserListRow[]; meId: string }) {
+export function UsersManager({ users, meId }: { users: UserListRow[]; meId: string }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -226,6 +226,7 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
               <UserCard
                 key={u.id}
                 user={u}
+                isSelf={u.id === meId}
                 statusPending={pendingId === u.id}
                 onEdit={() => open("edit", u.id)}
                 onReset={() => open("reset", u.id)}
@@ -240,6 +241,7 @@ export function UsersManager({ users }: { users: UserListRow[]; meId: string }) 
               <UserRow
                 key={u.id}
                 user={u}
+                isSelf={u.id === meId}
                 statusPending={pendingId === u.id}
                 onEdit={() => open("edit", u.id)}
                 onReset={() => open("reset", u.id)}

@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  FileText,
   Loader2,
   Printer,
   ClipboardList,
@@ -15,6 +18,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { printEndDay } from "@/components/print-end-day";
 import { formatPaise } from "@/lib/money";
 import { addDays } from "@/lib/date-range";
+import { roleTitle } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import type { Tone } from "@/lib/activity/actions";
 import {
@@ -23,28 +27,36 @@ import {
 } from "@/lib/reports/actions";
 import type { ReportableStaff } from "@/lib/reports/repository";
 import type { BillTypeValue } from "@/lib/reports/summary";
-import { ChartCard, MoneyBarChart, PaymentModeDonut } from "./charts";
+import { PaymentModeDonut } from "./charts";
 
 // The daily report screen (plan §5). Display + a date/subject control only - every
 // number is server-computed by the pure shaper and arrives already shaped; this
-// component NEVER sums money itself (dev-rules §2/§26). The breakdowns render as
-// Recharts charts (./charts) in the app's calm teal palette; colour is for status
-// only (§5). An admin gets a subject picker (Hospital total + any staff member);
-// everyone else is pinned to their own data (server-enforced). Printable via the
-// `end_day` pdfme template (components/print-end-day), the same design/print path
-// as receipts - so a hospital with no end_day design gets no Print button.
+// component NEVER sums money itself (dev-rules §2/§26). An admin gets a subject
+// picker (Hospital total + any staff member); everyone else is pinned to their own
+// data (server-enforced).
+//
+// PRINTING - two routes onto paper, and they are NOT redundant:
+//   • Print → window.print(). The screen IS the paper (@media print in globals.css).
+//     Exact, includes the donut, can never drift from what was reviewed on screen.
+//   • PDF → the `end_day` pdfme template (lib/printing/defaults/end_day.ts), which is
+//     laid out as this sheet's paper twin. A true A4 PDF: no browser URL/date in the
+//     margins, letterhead band reserved, re-designable by an admin in Receipt
+//     Templates. Gated on a template existing; the route re-authorizes regardless.
+// The template is a SECOND expression of this design - change one, change the other.
+//
+// WHY THIS IS A SHEET AND NOT A DASHBOARD: /admin answers "how is the hospital doing
+// right now" - it is live, unbounded in time, and asks the admin to ACT. This screen
+// answers "does the till match, and who did what" for ONE clinic day and ONE subject,
+// and its whole purpose is the A4 sheet it prints. When both screens wore the same
+// KPI-tiles-then-charts costume they read as the same page, so this one is deliberately
+// a DOCUMENT: a paper surface, a masthead naming hospital/day/subject, ruled ledger
+// rows with right-aligned tabular amounts, and a double-ruled grand total. Keep it that
+// way - do not reintroduce trend badges, sparklines, or hero stat cards here. Those are
+// dashboard vocabulary and they belong on /admin.
 
 const EVERYONE = "everyone";
 
-// Titled role, matching lib/nav's ROLE_TITLE, for the staff picker's right hint.
-const ROLE_HINT: Record<string, string> = {
-  admin: "Administrator",
-  supervisor: "Supervisor",
-  op_desk: "OP Desk",
-  op_ip_desk: "OP + IP Desk",
-};
-
-// Status dot colour for an activity tile - colour is for status only (§5).
+// Status dot colour for an activity row - colour is for status only (§5).
 const DOT_TINT: Record<Tone, string> = {
   accent: "bg-primary",
   success: "bg-green-600",
@@ -52,30 +64,120 @@ const DOT_TINT: Record<Tone, string> = {
   danger: "bg-destructive",
 };
 
-// One money KPI tile in the headline strip: an uppercase label, the rupee amount,
-// and an optional note. `danger` tints a non-zero voided figure red (status colour
-// only, §5). Number-forward and uniform so the strip reads as one clean row.
-function StatTile({
-  label,
-  paise,
+// ── Document primitives ───────────────────────────────────────────────────────
+// A rupee figure on a ledger line. A negative is written "-₹2,000.00", NEVER
+// "₹-2,000.00": the sign belongs to the quantity, not inside the currency, and a
+// minus hidden after the symbol is exactly what gets skipped by an eye running down
+// a column of amounts - on the sheet someone counts the drawer against. Negatives are
+// real here (a discharge whose advance exceeded the final bill lands as a negative IP
+// total), so this is not a theoretical case.
+function Money({ paise }: { paise: number }) {
+  return (
+    <>
+      {paise < 0 ? "-" : ""}₹{formatPaise(Math.abs(paise))}
+    </>
+  );
+}
+
+// A titled band of the sheet. The heading is a small letterspaced rule-line, not a
+// card header - sections here are parts of one document, not separate panels.
+function Section({
+  title,
   note,
-  danger,
+  children,
+}: {
+  title: string;
+  note?: string;
+  children: React.ReactNode;
+}) {
+  // break-inside-avoid: a ledger split across a page boundary puts rows on one sheet
+  // and their subtotal on another, which is how a figure gets counted twice.
+  return (
+    <section className="mt-7 break-inside-avoid first:mt-0">
+      <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {title}
+      </h2>
+      {note ? (
+        <p className="mt-0.5 text-[11px] font-medium text-muted-foreground/80">{note}</p>
+      ) : null}
+      <div className="mt-2">{children}</div>
+    </section>
+  );
+}
+
+// The ledger table frame. Fixed columns so an eye can run straight down the amounts.
+function Ledger({ children }: { children: React.ReactNode }) {
+  return (
+    <table className="w-full border-collapse">
+      <colgroup>
+        <col />
+        <col className="w-28" />
+        <col className="w-36" />
+      </colgroup>
+      <tbody>{children}</tbody>
+    </table>
+  );
+}
+
+// One ruled ledger line: label, an optional count, the amount. A zero line is muted
+// but NEVER dropped - the shaper zero-fills every type/mode so the sheet's layout is
+// identical every day (§5, nothing moves, muscle memory).
+function Line({
+  label,
+  hint,
+  count,
+  countLabel,
+  paise,
+  muted,
+  strike,
 }: {
   label: string;
+  hint?: string;
+  count?: number;
+  countLabel?: string;
   paise: number;
-  note?: string;
-  danger?: boolean;
+  muted?: boolean;
+  strike?: boolean;
 }) {
+  const dim = muted ?? paise === 0;
   return (
-    <div className={cn("rounded-xl border bg-card p-5", danger && "border-destructive/30 bg-destructive/5")}>
-      <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className={cn("mt-1.5 text-2xl font-bold tabular-nums", danger ? "text-destructive" : "text-foreground")}>
-        ₹{formatPaise(paise)}
-      </div>
-      {note ? <div className="mt-0.5 text-xs font-medium text-muted-foreground">{note}</div> : null}
-    </div>
+    <tr className="border-b border-border/70">
+      <td className="py-2 pr-3 align-top">
+        <span className={cn("text-sm font-medium", dim ? "text-muted-foreground" : "text-foreground")}>
+          {label}
+        </span>
+        {hint ? (
+          <span className="mt-0.5 block text-[11px] font-medium text-muted-foreground/80">{hint}</span>
+        ) : null}
+      </td>
+      <td className="px-3 py-2 text-right align-top text-xs font-medium tabular-nums text-muted-foreground">
+        {countLabel ?? (count != null ? count : "")}
+      </td>
+      <td
+        className={cn(
+          "py-2 pl-3 text-right align-top text-sm font-semibold tabular-nums",
+          dim ? "text-muted-foreground" : "text-foreground",
+          strike && "text-muted-foreground line-through decoration-1",
+        )}
+      >
+        <Money paise={paise} />
+      </td>
+    </tr>
+  );
+}
+
+// A section subtotal: a single rule above, bolder type. Ledger convention.
+function Subtotal({ label, count, paise }: { label: string; count?: number; paise: number }) {
+  return (
+    <tr className="border-t-2 border-foreground/70">
+      <td className="pt-2 pr-3 text-sm font-bold text-foreground">{label}</td>
+      <td className="px-3 pt-2 text-right text-xs font-semibold tabular-nums text-muted-foreground">
+        {count != null ? count : ""}
+      </td>
+      <td className="pt-2 pl-3 text-right text-sm font-bold tabular-nums text-foreground">
+        <Money paise={paise} />
+      </td>
+    </tr>
   );
 }
 
@@ -88,9 +190,9 @@ export function DailyReportView({
   initial: DailyReportResult;
   todayIso: string;
   staff: ReportableStaff[];
-  // Server-resolved: is there an active End-Day design to print through? When
-  // false, no Print button renders (print-updates plan §1c/§4c). The on-screen
-  // report stays for reading regardless.
+  // Server-resolved: is there an active `end_day` design to render a PDF through?
+  // Gates the PDF button only (print-updates plan §1c/§4c). The browser Print button
+  // never depends on it - that one prints the DOM, which always exists.
   printable: boolean;
 }) {
   const [dayIso, setDayIso] = useState(initial.meta.dayIso);
@@ -126,11 +228,13 @@ export function DailyReportView({
 
   // Subject-adaptive wording - the numbers are the same shape either way.
   const subjectName = meta.subjectName ?? "";
+  const subjectLabel = everyone ? "Hospital total (all staff)" : subjectName;
   const activityHeading = everyone ? "Hospital activity" : isSelf ? "What I did" : "Activity";
-  const collectedHeading = everyone ? "Collected" : isSelf ? "What I collected" : "Collected";
 
   // Only the bill types this subject can actually produce (server-derived from role).
-  const byType = report.byType.filter((l) => meta.allowedBillTypes.includes(l.key as BillTypeValue));
+  const byType = report.byType.filter((l) =>
+    meta.allowedBillTypes.includes(l.key as BillTypeValue),
+  );
   // Deposits/approvals only apply to roles that can admit / approve (or the whole
   // hospital view). Off-limits figures are simply not shown for that person.
   const showDeposits = everyone || meta.canAdmit;
@@ -143,23 +247,47 @@ export function DailyReportView({
     ...staff.map((s): ComboboxOption => ({
       value: s.id,
       label: s.active ? s.name : `${s.name} (deactivated)`,
-      hint: ROLE_HINT[s.role] ?? "Staff",
+      hint: roleTitle(s.role),
       keywords: s.role,
     })),
   ];
 
-  return (
-    <div className="w-full">
-      {/* Controls - not part of the printed sheet. Title left; date + filters right. */}
-      <div data-no-print className="mb-5 flex flex-nowrap items-center justify-between gap-4">
-        <div className="shrink-0">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Daily report</h1>
-          <p className="mt-0.5 text-sm font-medium text-muted-foreground">
-            {everyone ? "Hospital-wide activity and collections" : isSelf ? "Your activity and collections" : `${subjectName}'s activity and collections`}
-          </p>
-        </div>
+  // Refunds are NOT here any more: they are a subtracted line in the money-in working
+  // below, because they are real cash leaving the drawer, not a footnote.
+  const hasAdjustments =
+    report.discountOnMyBillsPaise > 0 ||
+    (showApproved && report.discountsApproved.count > 0) ||
+    report.voids.count > 0;
 
-        <div className="flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+  return (
+    <div className="w-full pb-10">
+      {/* ── Toolbar. Not part of the sheet and not part of the print: this is the
+          desk furniture you use to CHOOSE which document to look at. It sits above
+          the paper, deliberately in the app's normal UI language. */}
+      <div data-no-print className="mx-auto mb-4 flex max-w-4xl flex-wrap items-center gap-3">
+        {/* Back to Admin - only for an admin, who reached this from the admin
+            dashboard and expects the same back link every other admin screen has.
+            A desk/supervisor lands here as their own nav destination, so there is
+            no /admin to go back to (and they can't open it). `canChooseSubject` is
+            the server's admin flag (§8) - this never grants access, only a link. */}
+        {meta.canChooseSubject ? (
+          <Link
+            href="/admin"
+            className="inline-flex w-fit items-center gap-1.5 rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ArrowLeft className="size-4" aria-hidden />
+            Back to Admin
+          </Link>
+        ) : null}
+
+        <div className="ml-auto flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+          {pending ? (
+            <span className="inline-flex items-center gap-1.5 pr-1 text-xs font-medium text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              Loading…
+            </span>
+          ) : null}
+
           {/* Subject picker - admin only (server still enforces who they may pick). */}
           {meta.canChooseSubject ? (
             <Combobox
@@ -172,7 +300,7 @@ export function DailyReportView({
             />
           ) : null}
 
-          <div className="flex h-9 items-center gap-1 rounded-lg border bg-white px-1">
+          <div className="flex h-9 items-center gap-1 rounded-lg border bg-card px-1">
             <button
               type="button"
               aria-label="Previous day"
@@ -208,141 +336,309 @@ export function DailyReportView({
           >
             Today
           </Button>
+          {/* TWO ways onto paper, deliberately. They are not duplicates:
+              - Print: window.print(). The sheet below IS the printed page (the
+                @media print rules in globals.css hide this toolbar and the app bar),
+                so what comes out is exactly what is on screen, including the donut.
+                Nothing to design, nothing to drift.
+              - PDF: the `end_day` pdfme template. A real A4 PDF - no browser URL/date
+                stamped in the margins, letterhead band reserved, and an admin can
+                re-lay it out in Receipt Templates. Gated on a template existing, the
+                same rule every other print button follows (§1b); the route re-checks.
+              Both are pure GETs of the same day+subject and fully retryable. */}
+          <Button type="button" size="sm" onClick={() => window.print()}>
+            <Printer className="size-4" aria-hidden />
+            Print
+          </Button>
           {printable ? (
-            <Button type="button" size="sm" onClick={() => printEndDay(dayIso, subject)}>
-              <Printer className="size-4" aria-hidden />
-              Print
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => printEndDay(dayIso, subject)}
+            >
+              <FileText className="size-4" aria-hidden />
+              PDF
             </Button>
           ) : null}
         </div>
       </div>
 
-      {/* The report body. */}
-      <div className={cn("relative", pending && "opacity-60")}>
-        {pending ? (
-          <div
-            data-no-print
-            className="absolute right-0 top-0 z-10 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-          >
-            <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            Loading…
-          </div>
-        ) : null}
-
-        {report.isEmpty ? (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card/40 px-6 py-16 text-center">
-            <span className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground">
-              <ClipboardList className="size-7" aria-hidden />
-            </span>
+      {/* ── The sheet. White paper on the cool canvas, A4-ish measure. */}
+      {/* On paper the sheet IS the page, so it sheds the affordances that made it
+          look like paper on screen: the card border, the drop shadow, the rounded
+          corners and the centred measure all exist to sell "a document on a desk",
+          and printing them would draw a box around the page inside the page. */}
+      <article
+        className={cn(
+          "mx-auto max-w-4xl rounded-lg border bg-card shadow-sm transition-opacity",
+          "print:max-w-none print:rounded-none print:border-0 print:shadow-none",
+          pending && "opacity-60",
+        )}
+      >
+        {/* Masthead: who, what, when, for whom. This is what makes the screen a
+            document - it states its own scope, so a printed copy left on a desk is
+            never ambiguous about which day or which person it covers. */}
+        <header className="border-b-2 border-foreground/80 px-8 pb-5 pt-7 print:px-0 print:pt-0">
+          <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
             <div>
-              <p className="text-base font-semibold text-foreground">No transactions on this day</p>
-              <p className="mx-auto mt-1 max-w-xs text-sm font-medium text-muted-foreground">
-                {everyone
-                  ? `Nothing was recorded at ${meta.hospitalName} for ${meta.dayLabel}.`
-                  : isSelf
-                    ? `Nothing was recorded under your account for ${meta.dayLabel}.`
-                    : `Nothing was recorded under ${subjectName} for ${meta.dayLabel}.`}
+              <h1 className="font-serif text-2xl font-bold tracking-tight text-foreground">
+                {meta.hospitalName}
+              </h1>
+              <p className="mt-1 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                End of day report
               </p>
             </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs sm:text-right">
+              <dt className="font-medium text-muted-foreground">Date</dt>
+              <dd className="font-semibold text-foreground">{meta.dayLabel}</dd>
+              <dt className="font-medium text-muted-foreground">Subject</dt>
+              <dd className="font-semibold text-foreground">
+                {subjectLabel}
+                {meta.subjectRoleTitle ? (
+                  <span className="font-medium text-muted-foreground"> · {meta.subjectRoleTitle}</span>
+                ) : null}
+              </dd>
+              <dt className="font-medium text-muted-foreground">Generated</dt>
+              <dd className="font-medium text-muted-foreground">
+                {meta.generatedAtLabel} · {meta.generatedByName}
+              </dd>
+            </dl>
           </div>
-        ) : (
-          <div className="flex flex-col gap-8">
-            {/* Collected - a headline KPI strip that fills the width. */}
-            <section>
-              <h2 className="mb-3 text-sm font-bold text-foreground">{collectedHeading}</h2>
-              <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
-                {/* Hero: total collected, emphasised in the brand accent. */}
-                <div className="rounded-xl border border-primary/20 bg-accent p-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-accent-foreground/80">
-                    Total collected
-                  </div>
-                  <div className="mt-1.5 text-3xl font-bold tabular-nums text-accent-foreground">
-                    ₹{formatPaise(report.collectedTotalPaise)}
-                  </div>
-                  <div className="mt-0.5 text-xs font-medium text-accent-foreground/70">
-                    across {report.collectedCount} {report.collectedCount === 1 ? "bill" : "bills"}
-                  </div>
-                </div>
+        </header>
 
-                <StatTile
-                  label={everyone ? "Discounts given" : isSelf ? "Discounts on my bills" : "Discounts on bills"}
-                  paise={report.discountOnMyBillsPaise}
-                />
-                {showApproved ? (
-                  <StatTile
-                    label={isSelf ? "Discounts I approved" : "Discounts approved"}
-                    paise={report.discountsApproved.totalPaise}
-                    note={`${report.discountsApproved.count} ${report.discountsApproved.count === 1 ? "approval" : "approvals"}`}
-                  />
-                ) : null}
-                {showDeposits ? (
-                  <StatTile
-                    label="Admission deposits"
-                    paise={report.advancesTotalPaise}
-                    note={`${report.advancesCount} ${report.advancesCount === 1 ? "advance" : "advances"} · held`}
-                  />
-                ) : null}
-              </div>
-
-              {/* Charts row. */}
-              <div
-                className={cn(
-                  "mt-4 grid gap-4 lg:grid-cols-2",
-                  showDeposits && report.advancesCount > 0 && "xl:grid-cols-3",
-                )}
-              >
-                <ChartCard
-                  caption="By payment mode (reconciliation)"
-                  footerLabel="Total collected"
-                  footerValue={`₹${formatPaise(report.collectedTotalPaise)}`}
-                >
-                  <PaymentModeDonut lines={report.byMode} totalPaise={report.collectedTotalPaise} />
-                </ChartCard>
-                <ChartCard
-                  caption="By bill type"
-                  footerLabel="Total collected"
-                  footerValue={`₹${formatPaise(report.collectedTotalPaise)}`}
-                >
-                  <MoneyBarChart lines={byType} />
-                </ChartCard>
-                {showDeposits && report.advancesCount > 0 ? (
-                  <ChartCard
-                    caption="Admission deposits by mode"
-                    footerLabel="Total deposits"
-                    footerValue={`₹${formatPaise(report.advancesTotalPaise)}`}
-                  >
-                    <MoneyBarChart lines={report.advancesByMode} />
-                  </ChartCard>
-                ) : null}
-              </div>
-            </section>
-
-            {/* Activity - a compact tile grid across the full width. */}
-            <section>
-              <h2 className="mb-3 text-sm font-bold text-foreground">{activityHeading}</h2>
-              {report.activity.length === 0 ? (
-                <p className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
-                  No logged actions on this day.
+        <div className="px-8 pb-8 pt-6 print:px-0 print:pb-0">
+          {report.isEmpty ? (
+            // An honest empty day, still inside the sheet: the masthead above already
+            // says which day and whose - so this reads as a document that certifies
+            // nothing happened, not as a page that failed to load (§7).
+            <div className="flex flex-col items-center gap-3 py-14 text-center">
+              <span className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                <ClipboardList className="size-6" aria-hidden />
+              </span>
+              <div>
+                <p className="text-base font-semibold text-foreground">No transactions on this day</p>
+                <p className="mx-auto mt-1 max-w-xs text-sm font-medium text-muted-foreground">
+                  {everyone
+                    ? `Nothing was recorded at ${meta.hospitalName} for ${meta.dayLabel}.`
+                    : isSelf
+                      ? `Nothing was recorded under your account for ${meta.dayLabel}.`
+                      : `Nothing was recorded under ${subjectName} for ${meta.dayLabel}.`}
                 </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
-                  {report.activity.map((a) => (
-                    <div key={a.action} className="rounded-xl border bg-card p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {a.label}
-                        </span>
-                        <span className={cn("size-2 shrink-0 rounded-full", DOT_TINT[a.tone])} aria-hidden />
-                      </div>
-                      <div className="mt-2 text-3xl font-bold tabular-nums text-foreground">{a.count}</div>
-                    </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Collections, by what was billed. */}
+              <Section
+                title="Collections"
+                note="Money taken at the counter for bills issued today."
+              >
+                <Ledger>
+                  {byType.map((l) => (
+                    <Line
+                      key={l.key}
+                      label={l.label}
+                      // An in-patient bill collects only the BALANCE left after its
+                      // advance, so this figure is routinely far below what was billed -
+                      // and ₹0 for a stay the advance covered in full. Say so on the row
+                      // itself; a bare "In-patient · 1 bill · ₹0.00" invites the reader
+                      // to conclude the sheet lost their money.
+                      hint={
+                        l.key === "ip"
+                          ? "Balance settled at discharge only - the advance is under Admission deposits."
+                          : undefined
+                      }
+                      count={l.count}
+                      countLabel={`${l.count} ${l.count === 1 ? "bill" : "bills"}`}
+                      paise={l.totalPaise}
+                    />
                   ))}
+                  <Subtotal
+                    label="Total collected"
+                    count={report.collectedCount}
+                    paise={report.collectedTotalPaise}
+                  />
+                </Ledger>
+              </Section>
+
+              {/* By payment mode - the breakdown you physically count against. The
+                  donut sits beside the rows as the share-of-drawer read; the rows
+                  remain the authority (every mode, zero-filled, exact). */}
+              <Section
+                title="By payment mode"
+                note="Count these against the drawer and the machine settlements."
+              >
+                {/* print: variants are load-bearing here, not polish. A printed page
+                    lays out at ~688px (A4 less margins), which is BELOW `lg` - so the
+                    lg: rules silently do not apply on paper and this would print as a
+                    stacked, full-width donut. */}
+                <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center print:grid-cols-[1fr_auto] print:items-center">
+                  <Ledger>
+                    {report.byMode.map((l) => (
+                      <Line key={l.key} label={l.label} count={l.count} paise={l.totalPaise} />
+                    ))}
+                    <Subtotal
+                      label="Total collected"
+                      count={report.collectedCount}
+                      paise={report.collectedTotalPaise}
+                    />
+                  </Ledger>
+                  {/* Deliberately NOT `hidden lg:block`. Recharts sizes itself by
+                      measuring this box, and a display:none box measures zero and
+                      never renders - so hiding the donut on a narrow screen would
+                      leave nothing for the printer to put on paper either, and the
+                      chart would vanish from the sheet without a trace. It always
+                      renders; the grid stacks it under the ledger when space is tight. */}
+                  <div className="break-inside-avoid">
+                    <PaymentModeDonut
+                      lines={report.byMode}
+                      totalPaise={report.collectedTotalPaise}
+                      showLegend={false}
+                    />
+                  </div>
                 </div>
-              )}
-            </section>
-          </div>
-        )}
-      </div>
+              </Section>
+
+              {/* Admission deposits: cash taken at admit that never becomes a bill.
+                  It is in the drawer, so it must be on the sheet - by mode, for the
+                  same reason the bills are. */}
+              {showDeposits && report.advancesCount > 0 ? (
+                <Section title="Admission deposits" note="Held against a future discharge bill.">
+                  <Ledger>
+                    {report.advancesByMode.map((l) => (
+                      <Line key={l.key} label={l.label} count={l.count} paise={l.totalPaise} />
+                    ))}
+                    <Subtotal
+                      label="Total deposits held"
+                      count={report.advancesCount}
+                      paise={report.advancesTotalPaise}
+                    />
+                  </Ledger>
+                </Section>
+              ) : null}
+
+              {/* Memoranda: real figures that must NOT be added or subtracted again.
+                  Each says so on its own line - an unlabelled number on a money sheet
+                  is an invitation to double-count it. */}
+              {hasAdjustments ? (
+                <Section title="Memoranda" note="For the record - already reflected in the totals above.">
+                  <Ledger>
+                    {report.discountOnMyBillsPaise > 0 ? (
+                      <Line
+                        label={everyone ? "Discounts given" : isSelf ? "Discounts on my bills" : "Discounts on bills"}
+                        hint="Already deducted from the collected figure."
+                        paise={report.discountOnMyBillsPaise}
+                      />
+                    ) : null}
+                    {showApproved && report.discountsApproved.count > 0 ? (
+                      <Line
+                        label={isSelf ? "Discounts I approved" : "Discounts approved"}
+                        hint="Approved for other staff's bills - not this subject's revenue."
+                        count={report.discountsApproved.count}
+                        countLabel={`${report.discountsApproved.count} ${report.discountsApproved.count === 1 ? "approval" : "approvals"}`}
+                        paise={report.discountsApproved.totalPaise}
+                      />
+                    ) : null}
+                    {report.voids.count > 0 ? (
+                      <Line
+                        label="Bills voided"
+                        hint="Cancelled - never counted as money in."
+                        count={report.voids.count}
+                        countLabel={`${report.voids.count} ${report.voids.count === 1 ? "bill" : "bills"}`}
+                        paise={report.voids.totalPaise}
+                        strike
+                      />
+                    ) : null}
+                  </Ledger>
+                </Section>
+              ) : null}
+
+              {/* The one number that has to match the drawer at close - shown as its
+                  WORKING, not as a lump. Every part is a real movement of cash, in the
+                  order it moved, so a person counting the till can follow the arithmetic
+                  instead of reconstructing it: money taken for bills, money taken as
+                  deposits, money handed back. The old sheet folded the refund into the
+                  in-patient bill line, which made a stay billed ₹18,000 against a
+                  ₹20,000 advance read "In-patient · 1 bill · −₹2,000". Right total,
+                  unreadable line. Keep the parts visible. */}
+              <section className="mt-8 break-inside-avoid">
+                <Ledger>
+                  <Line label="Bills collected" paise={report.collectedTotalPaise} muted={false} />
+                  {showDeposits && report.advancesCount > 0 ? (
+                    <Line
+                      label="Admission deposits taken"
+                      hint="Cash in at admit, against a future discharge bill."
+                      paise={report.advancesTotalPaise}
+                      muted={false}
+                    />
+                  ) : null}
+                  {report.refunds.count > 0 ? (
+                    <Line
+                      label="Refunds paid out"
+                      hint="Cash back to the patient where an advance exceeded the final bill."
+                      countLabel={`${report.refunds.count} ${report.refunds.count === 1 ? "refund" : "refunds"}`}
+                      paise={-report.refunds.totalPaise}
+                      muted={false}
+                    />
+                  ) : null}
+                </Ledger>
+
+                <div className="mt-1 border-t-4 border-double border-foreground/80 pt-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                    <div>
+                      <span className="text-sm font-bold uppercase tracking-widest text-foreground">
+                        Money in
+                      </span>
+                      <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                        This is the figure to reconcile against the drawer at close.
+                      </p>
+                    </div>
+                    <span className="font-serif text-3xl font-bold tabular-nums text-foreground">
+                      <Money paise={report.moneyInTotalPaise} />
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              {/* Activity - counts of what was logged, as ruled rows rather than
+                  number tiles. Same reason as everything above: this is a sheet. */}
+              <Section title={activityHeading}>
+                {report.activity.length === 0 ? (
+                  <p className="py-2 text-sm text-muted-foreground">No logged actions on this day.</p>
+                ) : (
+                  <table className="w-full border-collapse">
+                    <tbody>
+                      {report.activity.map((a) => (
+                        <tr key={a.action} className="border-b border-border/70">
+                          <td className="py-2 pr-3">
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={cn("size-1.5 shrink-0 rounded-full", DOT_TINT[a.tone])}
+                                aria-hidden
+                              />
+                              <span className="text-sm font-medium text-foreground">{a.label}</span>
+                            </span>
+                          </td>
+                          <td className="w-20 py-2 pl-3 text-right text-sm font-semibold tabular-nums text-foreground">
+                            {a.count}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-foreground/70">
+                        <td className="pt-2 pr-3 text-sm font-bold text-foreground">Total actions</td>
+                        <td className="pt-2 pl-3 text-right text-sm font-bold tabular-nums text-foreground">
+                          {report.activityTotal}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </Section>
+            </>
+          )}
+        </div>
+      </article>
     </div>
   );
 }

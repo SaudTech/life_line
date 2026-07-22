@@ -35,7 +35,7 @@ import {
   createAdmission,
   addAdmissionExpense,
   removeAdmissionExpense,
-  updateAdmissionExpenseQuantity,
+  updateAdmissionExpense,
   getAdmissionForDischarge,
   getAdmissionDetail,
   dischargeWithBill,
@@ -266,12 +266,13 @@ export async function addExpenseAction(input: unknown): Promise<ActionResult<Exp
   return { ok: true, data: tally! };
 }
 
-// Adjust the quantity of an existing catalog expense (inline stepper on the tally).
-// Re-prices server-side from the LIVE catalog exactly like addExpenseAction - the
-// client's amount is never trusted. The item is matched to its catalog service by
-// the stored name snapshot; if that service is gone, the change is rejected rather
-// than silently repriced.
-export async function updateExpenseQuantityAction(input: unknown): Promise<ActionResult<ExpenseTally>> {
+// Adjust an existing catalog expense - its quantity (inline stepper) and/or its
+// service (the line's picker stays live until discharge, so a mis-picked item is
+// corrected in place). Re-prices server-side from the LIVE catalog exactly like
+// addExpenseAction - the client's amount is never trusted. Without a serviceId the
+// line keeps its service, matched to the catalog by the stored name snapshot; if
+// that service is gone the change is rejected rather than silently repriced.
+export async function updateExpenseAction(input: unknown): Promise<ActionResult<ExpenseTally>> {
   const s = await requireRole(IP_ROLES);
   const parsed = updateExpenseSchema.safeParse(input);
   if (!parsed.success) {
@@ -285,16 +286,24 @@ export async function updateExpenseQuantityAction(input: unknown): Promise<Actio
   if (!existing) return { ok: false, formError: "That expense could not be found." };
 
   const services = await listActiveServices();
-  const service = services.find((sv) => sv.name === existing.item);
+  const service = v.serviceId
+    ? services.find((sv) => sv.id === v.serviceId)
+    : services.find((sv) => sv.name === existing.item);
   if (!service) {
-    return { ok: false, formError: "That service is no longer available to re-price." };
+    return {
+      ok: false,
+      formError: v.serviceId
+        ? "That service is no longer available."
+        : "That service is no longer available to re-price.",
+    };
   }
   const unitPricePaise = Number(service.price_paise);
   const totalPaise = computeLineTotal(unitPricePaise, v.quantity);
 
-  const updated = await updateAdmissionExpenseQuantity({
+  const updated = await updateAdmissionExpense({
     admissionId: v.admissionId,
     expenseId: v.expenseId,
+    item: service.name,
     quantity: v.quantity,
     totalPaise,
   });
@@ -309,7 +318,13 @@ export async function updateExpenseQuantityAction(input: unknown): Promise<Actio
     entity: "admission",
     targetId: v.admissionId,
     locationId,
-    details: { expense_id: v.expenseId, item: existing.item, quantity: v.quantity, total_paise: totalPaise },
+    details: {
+      expense_id: v.expenseId,
+      item: service.name,
+      previous_item: existing.item !== service.name ? existing.item : undefined,
+      quantity: v.quantity,
+      total_paise: totalPaise,
+    },
   });
 
   revalidatePath(PANEL_PATH);
@@ -474,11 +489,18 @@ export async function authorizeDischargeDiscountAction(input: {
   if (discountPaise <= 0) {
     return { ok: false, formError: "Enter a discount percentage or amount." };
   }
-  const approver = await findApproverByPin(pinParsed.data.pin);
+  // Resolved before the PIN check, not inside the failure log: the approver lookup is
+  // SCOPED to this location, so only a supervisor at this branch can authorize this
+  // branch's discount (§8).
+  const locationId = await getUserLocationId(s.sub);
+  if (!locationId) {
+    return { ok: false, formError: "Could not resolve your location. Please sign in again." };
+  }
+  const approver = await findApproverByPin(pinParsed.data.pin, locationId);
   if (!approver) {
     await logFailedPinAttempt({
       actorId: s.sub,
-      locationId: await getUserLocationId(s.sub),
+      locationId,
       context: "discharge",
     });
     return { ok: false, fieldErrors: { pin: "PIN not recognised." } };
@@ -543,7 +565,7 @@ export async function dischargeAction(input: unknown): Promise<ActionResult<Disc
     if (!v.discountPin) {
       return { ok: false, fieldErrors: { discountPin: "A supervisor PIN is required for a discount." } };
     }
-    const approver = await findApproverByPin(v.discountPin);
+    const approver = await findApproverByPin(v.discountPin, locationId);
     if (!approver) {
       await logFailedPinAttempt({ actorId: s.sub, locationId, context: "discharge" });
       return { ok: false, fieldErrors: { discountPin: "PIN not recognised." } };
@@ -608,6 +630,8 @@ export async function dischargeAction(input: unknown): Promise<ActionResult<Disc
     subtotalPaise: balance.subtotalPaise,
     discountPaise: balance.discountPaise,
     totalPaise: balance.totalPaise,
+    balanceDuePaise: balance.balanceDuePaise,
+    refundPaise: balance.refundPaise,
     paymentMode: v.paymentMode,
     discountApprovedBy: approverId,
     createdBy: s.sub,

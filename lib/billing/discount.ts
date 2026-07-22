@@ -11,10 +11,18 @@ import { computeDiscountPaise, clampDiscountPaise } from "./rules";
 // Try each supervisor/admin PIN hash; return the matching user or null. scrypt
 // is salted per row, so a PIN can't be looked up directly - every active
 // approver's hash is tried.
+//
+// SECURITY: `locationId` is REQUIRED, and scopes the candidate approvers to the branch
+// the bill belongs to (§8, enforced on the server). Without it, any supervisor PIN in
+// the company authorized a discount at any branch - an approval is a money decision
+// about one location's bill, so only that location's supervisors may make it. It is a
+// parameter rather than a default so a new call site cannot forget it: leaving it out
+// is a compile error, not a silent cross-branch grant.
 export async function findApproverByPin(
   pin: string,
+  locationId: string,
 ): Promise<{ id: string; name: string } | null> {
-  const approvers = await listDiscountApprovers();
+  const approvers = await listDiscountApprovers(locationId);
   for (const a of approvers) {
     if (await verifyPassword(pin, a.pin_hash)) return { id: a.id, name: a.name };
   }

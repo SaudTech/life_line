@@ -28,7 +28,7 @@ import { PAYMENT_MODES, type PaymentModeValue } from "@/lib/admissions/schema";
 import {
   addExpenseAction,
   removeExpenseAction,
-  updateExpenseQuantityAction,
+  updateExpenseAction,
   previewDischargeAction,
   authorizeDischargeDiscountAction,
   dischargeAction,
@@ -136,12 +136,11 @@ function AdmittedView({
   onDischarged: (o: DischargeOutcome) => void;
   advancePrintable: boolean;
 }) {
-  // Add-expense row.
-  const [serviceId, setServiceId] = useState("");
-  const [qty, setQty] = useState("1");
-  const [adding, setAdding] = useState(false);
-  const [expenseError, setExpenseError] = useState<string | null>(null);
-  const serviceRef = useRef<HTMLButtonElement>(null);
+  // The tally is a list of live rows plus one always-present blank row at the
+  // bottom - there is no Add button: picking a service on the blank row saves it
+  // and a fresh blank row takes its place (its key bumps to remount it). Saved
+  // rows never go read-only, so adding item 5 doesn't freeze items 1-4.
+  const [draftKey, setDraftKey] = useState(0);
 
   // Discharge panel. Room = rate/day × days: pre-fill the rate from the admission
   // (or a stored flat total split as rate×1), and the days from the recorded days
@@ -164,30 +163,6 @@ function AdmittedView({
   const [formError, setFormError] = useState<string | null>(null);
   const previewSeq = useRef(0);
   const submittingRef = useRef(false);
-
-  const qtyNum = Number(qty);
-  const canAdd = serviceId !== "" && Number.isInteger(qtyNum) && qtyNum >= 1 && !adding;
-
-  async function addExpense() {
-    if (!canAdd) return;
-    setAdding(true);
-    setExpenseError(null);
-    try {
-      const res = await addExpenseAction({ admissionId: detail.id, serviceId, quantity: qtyNum });
-      if (!res.ok) {
-        setExpenseError(res.formError ?? Object.values(res.fieldErrors ?? {})[0] ?? "Could not add.");
-        return;
-      }
-      applyTally(res.data!);
-      setServiceId("");
-      setQty("1");
-      serviceRef.current?.focus();
-    } catch {
-      setExpenseError("Could not add - please try again.");
-    } finally {
-      setAdding(false);
-    }
-  }
 
   function applyTally(t: ExpenseTally) {
     setExpenses(t.expenses);
@@ -267,52 +242,31 @@ function AdmittedView({
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 text-[15px] font-bold text-foreground">Expenses</h2>
 
-            {expenses.length === 0 ? (
-              <p className="mb-3 text-sm text-muted-foreground">No expenses added yet.</p>
-            ) : (
-              <div className="mb-3 grid gap-1.5">
-                {expenses.map((e) => (
-                  <ExpenseRow key={e.id} expense={e} admissionId={detail.id} applyTally={applyTally} />
-                ))}
-              </div>
-            )}
-
-            {/* Add row (catalog-only) */}
-            <div className="flex items-center gap-2">
-              <ServiceCombobox
-                ref={serviceRef}
+            <div className="grid gap-1.5">
+              {expenses.map((e) => (
+                <ExpenseRow
+                  key={e.id}
+                  expense={e}
+                  services={services}
+                  admissionId={detail.id}
+                  applyTally={applyTally}
+                />
+              ))}
+              {/* The blank row: no Add button - a picked service saves itself. */}
+              <DraftExpenseRow
+                key={draftKey}
                 services={services}
-                value={serviceId}
-                onChange={setServiceId}
-                className="flex-1"
+                admissionId={detail.id}
+                autoFocus={draftKey > 0}
+                applyTally={applyTally}
+                onAdded={() => setDraftKey((k) => k + 1)}
               />
-              <input
-                value={qty}
-                onChange={(e) => setQty(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                onKeyDown={(e) => {
-                  if (["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"].includes(e.key)) {
-                    e.preventDefault();
-                    const step = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1 : -1;
-                    setQty(String(Math.max(1, (Number(qty) || 0) + step)));
-                  }
-                  if (e.key === "Enter") addExpense();
-                }}
-                type="text"
-                inputMode="numeric"
-                aria-label="Quantity"
-                placeholder="Qty"
-                className="h-10 w-16 rounded-lg border bg-background px-2 text-center text-sm text-foreground outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary"
-              />
-              <Button type="button" variant="outline" size="sm" className="h-10" disabled={!canAdd} onClick={addExpense}>
-                {adding ? <Loader2 className="animate-spin" aria-hidden /> : <Plus className="size-4" aria-hidden />}
-                Add
-              </Button>
             </div>
-            {expenseError ? <p className="mt-2 text-sm font-medium text-destructive">{expenseError}</p> : null}
+
             <p className="mt-2 text-xs text-muted-foreground">
               Expenses come from the services catalog and are priced live on the server. Each item
-              is <b>saved as you add it</b> - you can leave and come back; nothing is billed until
-              you discharge.
+              is <b>saved the moment you pick it</b> and stays editable until discharge - you can
+              leave and come back; nothing is billed until you discharge.
             </p>
           </section>
         </div>
@@ -752,28 +706,42 @@ function DischargePinDialog({
   );
 }
 
-// One added expense: name, an inline quantity stepper, the server-priced total,
-// and remove. The quantity stays adjustable after adding - every change re-prices
-// on the server (updateExpenseQuantityAction) and the returned tally is applied, so
-// the amount shown is always server money (dev-rules §4), never a client formula.
+// One saved expense: its service picker, an inline quantity stepper, the
+// server-priced total, and remove. The row NEVER goes read-only while the patient
+// is admitted - both the service and the quantity stay editable however many other
+// items are added after it. Every change re-prices on the server
+// (updateExpenseAction) and the returned tally is applied, so the amount shown is
+// always server money (dev-rules §4), never a client formula.
 function ExpenseRow({
   expense,
+  services,
   admissionId,
   applyTally,
 }: {
   expense: AdmissionExpenseRow;
+  services: ServiceRow[];
   admissionId: string;
   applyTally: (t: ExpenseTally) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const serviceId = serviceIdFor(services, expense.item);
 
-  async function setQuantity(quantity: number) {
-    if (quantity < 1 || quantity === expense.quantity || busy) return;
+  // serviceId omitted = keep this line's service, change the quantity only.
+  async function save(next: { serviceId?: string; quantity?: number }) {
+    const quantity = next.quantity ?? expense.quantity;
+    if (busy || quantity < 1) return;
+    if (next.quantity === expense.quantity) return;
+    if (next.serviceId === serviceId) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await updateExpenseQuantityAction({ admissionId, expenseId: expense.id, quantity });
+      const res = await updateExpenseAction({
+        admissionId,
+        expenseId: expense.id,
+        serviceId: next.serviceId,
+        quantity,
+      });
       if (!res.ok) {
         setError(res.formError ?? Object.values(res.fieldErrors ?? {})[0] ?? "Could not update.");
         return;
@@ -807,30 +775,24 @@ function ExpenseRow({
   return (
     <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-foreground">{expense.item}</span>
-        <div className="flex shrink-0 items-center rounded-lg border bg-background">
-          <button
-            type="button"
-            onClick={() => setQuantity(expense.quantity - 1)}
-            disabled={busy || expense.quantity <= 1}
-            aria-label={`Decrease ${expense.item} quantity`}
-            className="flex size-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Minus className="size-3.5" aria-hidden />
-          </button>
-          <span className="w-8 text-center text-sm font-medium tabular-nums text-foreground" aria-live="polite">
-            {busy ? <Loader2 className="mx-auto size-3.5 animate-spin" aria-hidden /> : expense.quantity}
-          </span>
-          <button
-            type="button"
-            onClick={() => setQuantity(expense.quantity + 1)}
-            disabled={busy}
-            aria-label={`Increase ${expense.item} quantity`}
-            className="flex size-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Plus className="size-3.5" aria-hidden />
-          </button>
-        </div>
+        {serviceId ? (
+          <ServiceCombobox
+            services={services}
+            value={serviceId}
+            onChange={(id) => save({ serviceId: id })}
+            className="min-w-0 flex-1"
+          />
+        ) : (
+          // The catalog no longer has this service, so it can't be re-picked or
+          // re-priced - show the stored name; remove is still available.
+          <span className="min-w-0 flex-1 truncate text-foreground">{expense.item}</span>
+        )}
+        <QtyStepper
+          quantity={expense.quantity}
+          busy={busy}
+          label={expense.item}
+          onChange={(quantity) => save({ quantity })}
+        />
         <span className="w-24 shrink-0 text-right font-semibold text-foreground">
           ₹{formatPaise(expense.total_paise)}
         </span>
@@ -847,6 +809,120 @@ function ExpenseRow({
       {error ? <p className="mt-1.5 text-xs font-medium text-destructive">{error}</p> : null}
     </div>
   );
+}
+
+// The blank row that always sits at the bottom of the tally. There is no Add
+// button: picking a service saves the line straight away (server-priced) and the
+// parent remounts a fresh blank row beneath it, so the desk just keeps picking.
+// Quantity can be dialled in before the pick; it is sent with the add.
+function DraftExpenseRow({
+  services,
+  admissionId,
+  autoFocus,
+  applyTally,
+  onAdded,
+}: {
+  services: ServiceRow[];
+  admissionId: string;
+  autoFocus: boolean;
+  applyTally: (t: ExpenseTally) => void;
+  onAdded: () => void;
+}) {
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const serviceRef = useRef<HTMLButtonElement>(null);
+
+  // Keep the desk on the keyboard: focus lands on the new blank row's picker.
+  useEffect(() => {
+    if (autoFocus) serviceRef.current?.focus();
+  }, [autoFocus]);
+
+  async function pick(serviceId: string) {
+    if (!serviceId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await addExpenseAction({ admissionId, serviceId, quantity: qty });
+      if (!res.ok) {
+        setError(res.formError ?? Object.values(res.fieldErrors ?? {})[0] ?? "Could not add.");
+        return;
+      }
+      applyTally(res.data!);
+      onAdded();
+    } catch {
+      setError("Could not add - please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <ServiceCombobox
+          ref={serviceRef}
+          services={services}
+          value=""
+          onChange={pick}
+          placeholder="Add an item…"
+          className="min-w-0 flex-1"
+        />
+        <QtyStepper quantity={qty} busy={busy} label="new item" onChange={setQty} />
+        <span className="w-24 shrink-0 text-right font-semibold text-muted-foreground">
+          {busy ? <Loader2 className="ml-auto size-4 animate-spin" aria-hidden /> : "—"}
+        </span>
+        {/* Keeps this row's columns aligned with the remove button above it. */}
+        <span className="size-8 shrink-0" aria-hidden />
+      </div>
+      {error ? <p className="mt-1.5 text-xs font-medium text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+// −/qty/+ used by both a saved line and the blank row, so they stay identical.
+function QtyStepper({
+  quantity,
+  busy,
+  label,
+  onChange,
+}: {
+  quantity: number;
+  busy: boolean;
+  label: string;
+  onChange: (quantity: number) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center rounded-lg border bg-background">
+      <button
+        type="button"
+        onClick={() => onChange(quantity - 1)}
+        disabled={busy || quantity <= 1}
+        aria-label={`Decrease ${label} quantity`}
+        className="flex size-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Minus className="size-3.5" aria-hidden />
+      </button>
+      <span className="w-8 text-center text-sm font-medium tabular-nums text-foreground" aria-live="polite">
+        {busy ? <Loader2 className="mx-auto size-3.5 animate-spin" aria-hidden /> : quantity}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(quantity + 1)}
+        disabled={busy || quantity >= 9999}
+        aria-label={`Increase ${label} quantity`}
+        className="flex size-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Plus className="size-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+// A stored item-name snapshot back to its catalog service id, "" when that service
+// has since left the catalog.
+function serviceIdFor(services: ServiceRow[], item: string): string {
+  return services.find((s) => s.name === item)?.id ?? "";
 }
 
 // ── Small pieces ─────────────────────────────────────────────────────────────

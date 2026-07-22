@@ -34,6 +34,10 @@ const DOT_TINT: Record<Tone, string> = {
 
 const STORAGE_KEY = "admin.activity.hiddenTags";
 
+// Ties the Filter button's aria-expanded to the panel it actually expands, so a
+// screen reader announces what opened. Static: only one feed renders per page.
+const FILTER_PANEL_ID = "activity-filter-panel";
+
 export function ActivityFeed({ items }: { items: ActivityItem[] }) {
   const router = useRouter();
   const [isRefreshing, startRefresh] = useTransition();
@@ -93,6 +97,7 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
             type="button"
             onClick={() => setShowFilters((v) => !v)}
             aria-expanded={showFilters}
+            aria-controls={FILTER_PANEL_ID}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               showFilters || hiddenCount > 0
@@ -123,7 +128,7 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
 
       {/* Tag filters - toggle which activity types are visible. */}
       {showFilters && (
-        <div className="mb-3.5 rounded-lg border border-dashed bg-muted/30 p-3">
+        <div id={FILTER_PANEL_ID} className="mb-3.5 rounded-lg border border-dashed bg-muted/30 p-3">
           {tags.length === 0 ? (
             <p className="text-xs font-medium text-muted-foreground">No activity types to filter yet.</p>
           ) : (

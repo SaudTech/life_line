@@ -298,23 +298,25 @@ export async function removeAdmissionExpense(input: {
   return res.rowCount === 1;
 }
 
-// Change the quantity (and its server-recomputed total) of an expense line on an
-// ADMITTED admission. Guarded on both the expense belonging to this admission AND
-// the admission still being admitted, so a discharged stay's itemisation can never
-// change after the bill exists. Returns true when a row was actually updated.
-export async function updateAdmissionExpenseQuantity(input: {
+// Change the item (service name snapshot), quantity, and server-recomputed total
+// of an expense line on an ADMITTED admission. Guarded on both the expense
+// belonging to this admission AND the admission still being admitted, so a
+// discharged stay's itemisation can never change after the bill exists. Returns
+// true when a row was actually updated.
+export async function updateAdmissionExpense(input: {
   admissionId: string;
   expenseId: string;
+  item: string;
   quantity: number;
   totalPaise: number;
 }): Promise<boolean> {
   const res = await pool.query(
     `UPDATE admission_expenses
-        SET quantity = $3, total_paise = $4
+        SET item = $3, quantity = $4, total_paise = $5
       WHERE id = $1
         AND admission_id = $2
         AND EXISTS (SELECT 1 FROM admissions WHERE id = $2 AND status = 'admitted')`,
-    [input.expenseId, input.admissionId, input.quantity, input.totalPaise],
+    [input.expenseId, input.admissionId, input.item, input.quantity, input.totalPaise],
   );
   return res.rowCount === 1;
 }
@@ -336,6 +338,13 @@ export interface DischargeInput {
   subtotalPaise: number;
   discountPaise: number;
   totalPaise: number;
+  // The SETTLEMENT, straight off calculateDischargeBalance. totalPaise is the GROSS
+  // bill and still contains the advance, so it can never be read as money collected;
+  // these two are what actually changed hands at the counter, and exactly one of them
+  // is ever non-zero. Persisted (migration 0018) because reporting has no other way to
+  // tell billed from collected - see lib/money-in.ts.
+  balanceDuePaise: number;
+  refundPaise: number;
   paymentMode: PaymentMode;
   discountApprovedBy: string | null;
   createdBy: string;
@@ -373,8 +382,9 @@ export async function dischargeWithBill(
     const bill = await client.query<{ id: string; bill_number: string }>(
       `INSERT INTO bills
          (patient_id, type, admission_id, subtotal_paise, discount_paise, total_paise,
+          balance_due_paise, refund_paise,
           status, payment_mode, discount_approved_by, created_by, location_id)
-       VALUES ($1, 'ip', $2, $3, $4, $5, 'final', $6, $7, $8, $9)
+       VALUES ($1, 'ip', $2, $3, $4, $5, $6, $7, 'final', $8, $9, $10, $11)
        RETURNING id, bill_number`,
       [
         input.patientId,
@@ -382,6 +392,8 @@ export async function dischargeWithBill(
         input.subtotalPaise,
         input.discountPaise,
         input.totalPaise,
+        input.balanceDuePaise,
+        input.refundPaise,
         input.paymentMode,
         input.discountApprovedBy,
         input.createdBy,

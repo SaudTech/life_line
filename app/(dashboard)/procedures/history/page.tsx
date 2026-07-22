@@ -27,11 +27,13 @@ export default async function ProceduresHistoryPage() {
   // matches what the debounced client re-fetch will show - no flash of the
   // full unfiltered history before it narrows.
   const today = presetRange("today", clinicToday());
-  const [initial, creators, services, locationId] = await Promise.all([
+  // The creator picker is location-scoped (§4), so it must wait on locationId rather
+  // than run alongside it - one extra round-trip, off the counter's hot path.
+  const locationId = await getUserLocationId(session.sub);
+  const [initial, creators, services] = await Promise.all([
     listProcedureBills({ dateFrom: today.dateFrom, dateTo: today.dateTo }),
-    listUsersByRole([...PROCEDURE_ROLES]),
+    locationId ? listUsersByRole([...PROCEDURE_ROLES], locationId) : Promise.resolve([]),
     listActiveServices(),
-    getUserLocationId(session.sub),
   ]);
   const printable = locationId ? await hasPrintableTemplate("procedure", locationId) : false;
   return (

@@ -9,11 +9,11 @@ import {
 } from "./nav";
 
 describe("navItemsForRole", () => {
-  it("returns admin's Dashboard + Users + Doctors + Services + Patients + OPD + Procedures as real links, the rest disabled", () => {
+  it("gives the admin every management link, each pointing at a real route", () => {
     const items = navItemsForRole("admin");
     expect(items.map((i) => i.label)).toEqual([
       "Dashboard",
-      "Users",
+      "Staff",
       "Doctors",
       "Services",
       "Patients",
@@ -21,12 +21,11 @@ describe("navItemsForRole", () => {
       "Procedures",
       "IPD",
       "Reports",
-      "Receipt Designs",
+      "Receipt Templates",
     ]);
-    // Real routes are not disabled; placeholders are and point nowhere real.
-    expect(items.find((i) => i.label === "Users")).toEqual({
+    expect(items.find((i) => i.label === "Staff")).toEqual({
       href: "/admin/users",
-      label: "Users",
+      label: "Staff",
     });
     expect(items.find((i) => i.label === "Doctors")).toEqual({
       href: "/admin/doctors",
@@ -48,11 +47,12 @@ describe("navItemsForRole", () => {
       href: "/procedures",
       label: "Procedures",
     });
-    expect(items.find((i) => i.label === "Receipt Designs")).toEqual({
+    expect(items.find((i) => i.label === "Receipt Templates")).toEqual({
       href: "/admin/receipts",
-      label: "Receipt Designs",
+      label: "Receipt Templates",
     });
-    expect(items.filter((i) => i.disabled).every((i) => i.href === "#")).toBe(true);
+    // Every item is a shipped route - the bar never links to a 404.
+    expect(items.every((i) => i.href.startsWith("/"))).toBe(true);
   });
 
   it("gives the OP-only desk the Counter, Procedures, and My Day links", () => {
@@ -103,7 +103,7 @@ describe("isActive (deepest match wins)", () => {
     expect(isActive("/admin/users/anything", "/admin", admin)).toBe(false);
   });
 
-  it("disabled placeholders (href '#') are never active", () => {
+  it("a non-route href ('#') is never active", () => {
     expect(isActive("/admin", "#", admin)).toBe(false);
     expect(isActive("#", "#", admin)).toBe(false);
   });

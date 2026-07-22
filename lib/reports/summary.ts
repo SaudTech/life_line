@@ -73,6 +73,10 @@ export interface MoneyRaw {
   voids: { count: number; totalPaise: number };
   // Admission deposits I took today (admissions.created_by = me), by payment mode.
   advancesByMode: MoneyGroupRow[];
+  // Cash I handed BACK today: a discharge whose advance exceeded the final total
+  // (§In-Patient - a refund is handled explicitly, never ignored). Already netted out
+  // of billsBy*, so this is the visible record of the outflow, not a second deduction.
+  refunds: { count: number; totalPaise: number };
 }
 
 // ── Shaped output (exactly what the UI renders) ────────────────────────────────
@@ -106,6 +110,15 @@ export interface DailyReport {
   advancesByMode: ReportLine[];
   advancesTotalPaise: number;
   advancesCount: number;
+  refunds: { count: number; totalPaise: number };
+  // The ONE number that has to match the drawer at close:
+  //   bills collected + advances taken − refunds paid out
+  // The three parts are separate FIELDS, not a pre-netted lump, so the sheet can show a
+  // reader the arithmetic: a ₹20,000 advance in, a ₹2,000 refund back out. This is the
+  // same quantity the admin dashboard sums for the same day (lib/money-in.ts, which
+  // nets the refund into the bill instead) - if the two ever disagree, one of them is
+  // lying about the hospital's money.
+  moneyInTotalPaise: number;
   // True when there is genuinely nothing to show - drives an honest empty state
   // instead of a wall of zeros or a crash (§7).
   isEmpty: boolean;
@@ -164,6 +177,7 @@ export function shapeDailyReport(
     collectedCount === 0 &&
     advancesCount === 0 &&
     money.voids.count === 0 &&
+    money.refunds.count === 0 &&
     money.discountsApproved.count === 0;
 
   return {
@@ -179,6 +193,12 @@ export function shapeDailyReport(
     advancesByMode,
     advancesTotalPaise,
     advancesCount,
+    refunds: money.refunds,
+    // Taken in, less handed back. The refund is subtracted exactly ONCE here, because
+    // the by-type/by-mode lines above are now gross of refunds (the repository sums
+    // billCollectedSql). Do not net it in there as well, or a refunded day is short by
+    // twice the refund.
+    moneyInTotalPaise: collectedTotalPaise + advancesTotalPaise - money.refunds.totalPaise,
     isEmpty,
   };
 }
@@ -192,5 +212,6 @@ export function emptyMoneyRaw(): MoneyRaw {
     discountsApproved: { count: 0, totalPaise: 0 },
     voids: { count: 0, totalPaise: 0 },
     advancesByMode: [],
+    refunds: { count: 0, totalPaise: 0 },
   };
 }

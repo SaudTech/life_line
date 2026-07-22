@@ -105,6 +105,38 @@ export const resetPasswordFormSchema = z
   });
 export type ResetPasswordFormValues = z.infer<typeof resetPasswordFormSchema>;
 
+// Self-service password change (any signed-in staff, plan §5). No `id` - the
+// target is ALWAYS the session user, never client-supplied, so one staffer can
+// never point this at another account. The current password must be proven; the
+// action verifies it against the stored hash before anything changes.
+const changeOwnPasswordFields = z.object({
+  currentPassword: z.string().min(1, "Enter your current password."),
+  password,
+});
+export const changeOwnPasswordSchema = changeOwnPasswordFields.refine(
+  (d) => d.password !== d.currentPassword,
+  {
+    message: "New password must be different from the current one.",
+    path: ["password"],
+  },
+);
+export type ChangeOwnPasswordValues = z.infer<typeof changeOwnPasswordSchema>;
+
+// Client-only form for the reveal-and-confirm UI: the new password typed twice.
+// Only { currentPassword, password } is sent to changeOwnPasswordAction (which
+// re-validates with changeOwnPasswordSchema - same base fields, same refine).
+export const changeOwnPasswordFormSchema = changeOwnPasswordFields
+  .extend({ confirmPassword: z.string() })
+  .refine((d) => d.password === d.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  })
+  .refine((d) => d.password !== d.currentPassword, {
+    message: "New password must be different from the current one.",
+    path: ["password"],
+  });
+export type ChangeOwnPasswordFormValues = z.infer<typeof changeOwnPasswordFormSchema>;
+
 // "" clears the PIN (pin_hash = NULL); a 4-6 digit value sets it.
 export const setPinSchema = z.object({
   id: z.string().uuid(),

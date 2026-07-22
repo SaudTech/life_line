@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/dal";
+import { requireAdmin, requireSession } from "@/lib/auth/dal";
+import { verifyCurrentPassword } from "@/lib/auth/authenticate";
 import { hashPassword } from "@/lib/password";
 import { logActivity } from "@/lib/audit";
 import { zodFieldErrors } from "@/lib/forms/action-result";
@@ -10,6 +11,7 @@ import {
   newUserSchema,
   updateUserSchema,
   resetPasswordSchema,
+  changeOwnPasswordSchema,
   setPinSchema,
   setActiveSchema,
 } from "./schema";
@@ -242,6 +244,39 @@ export async function resetPasswordAction(input: unknown): Promise<ActionResult>
     locationId: await getUserLocationId(s.sub),
   });
   revalidatePath(PANEL_PATH);
+  return { ok: true };
+}
+
+// Self-service: ANY signed-in staff member changes their OWN password. Unlike
+// the admin actions above this gates on requireSession, and the target is always
+// the session user (s.sub) - the schema carries no id, so the client can't point
+// it at another account. The current password must verify (proof of possession)
+// before anything is written; a wrong one surfaces as a field error, and the
+// verify also fails closed for an inactive/vanished row.
+export async function changeOwnPasswordAction(input: unknown): Promise<ActionResult> {
+  const s = await requireSession();
+
+  const parsed = changeOwnPasswordSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
+  }
+  const v = parsed.data;
+
+  if (!(await verifyCurrentPassword(s.sub, v.currentPassword))) {
+    return {
+      ok: false,
+      fieldErrors: { currentPassword: "Current password is incorrect." },
+    };
+  }
+
+  await setUserPassword(s.sub, await hashPassword(v.password));
+  await logActivity({
+    actorId: s.sub,
+    action: "user.password_change",
+    entity: "user",
+    targetId: s.sub,
+    locationId: await getUserLocationId(s.sub),
+  });
   return { ok: true };
 }
 

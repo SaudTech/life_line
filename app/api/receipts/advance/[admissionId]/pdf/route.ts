@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { generate } from "@pdfme/generator";
+import { loadPdfFonts, withRenderableFonts } from "@/lib/printing/fonts-loader";
 import { requireSession } from "@/lib/auth/dal";
 import { getUserLocationId } from "@/lib/users/repository";
 import { getAdvanceReceiptDocument } from "@/lib/printing/advance-receipt-repository";
@@ -43,12 +44,14 @@ export async function GET(
 
   const inputs = advanceReceiptToInputs(doc);
 
-  // No options.font - pdfme's bundled Roboto already includes the ₹ glyph (same
-  // as the bill route).
+  // The receipt font catalog, same as the bill route. Roboto stays the fallback and
+  // every catalog font carries ₹ (fonts.test.ts).
+  const font = await loadPdfFonts();
   const pdf = await generate({
-    template: ADVANCE_RECEIPT_DEFAULT_TEMPLATE,
+    template: withRenderableFonts(ADVANCE_RECEIPT_DEFAULT_TEMPLATE, font),
     inputs: [inputs],
     plugins: PDF_PLUGINS,
+    options: { font },
   });
 
   return new NextResponse(Buffer.from(pdf), {

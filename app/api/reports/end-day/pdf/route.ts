@@ -7,6 +7,7 @@ import { clinicToday } from "@/lib/date-range";
 import { getEndDayDocument } from "@/lib/printing/end-day-document";
 import { getActiveTemplate } from "@/lib/printing/repository";
 import { billDocumentToInputs } from "@/lib/printing/fields";
+import { loadPdfFonts, withRenderableFonts } from "@/lib/printing/fonts-loader";
 import { PDF_PLUGINS } from "@/lib/printing/pdf-plugins";
 
 // Turns the day-close being viewed into an A4 PDF through the active `end_day`
@@ -72,10 +73,13 @@ export async function GET(req: NextRequest) {
 
   const inputs = billDocumentToInputs(doc);
 
+  // The receipt font catalog, same as the bill routes - see lib/printing/fonts.ts.
+  const font = await loadPdfFonts();
   const pdf = await generate({
-    template: tpl.schema_json,
+    template: withRenderableFonts(tpl.schema_json, font),
     inputs: [inputs],
     plugins: PDF_PLUGINS,
+    options: { font },
   });
 
   return new NextResponse(Buffer.from(pdf), {

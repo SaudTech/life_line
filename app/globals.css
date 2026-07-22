@@ -117,16 +117,27 @@
 }
 
 /*
- * Print - the "My day" handover sheet (reports plan §5). window.print() renders
- * an A4 tabular sheet: hide the app chrome (the sticky top bar <header>) and any
+ * Print - the End-Day sheet (reports plan §5). window.print() puts the report
+ * sheet on paper EXACTLY as it renders on screen: the screen document IS the
+ * printed document, so the two can never drift apart the way a separate PDF
+ * template does. Hide the app chrome (the sticky top bar <header>) and any
  * on-screen-only controls ([data-no-print]), drop the page padding, and force a
  * white canvas with backgrounds preserved so table headers/status tints still
  * read on paper. Nothing here is specific to one page - any screen can opt an
  * element out of print with data-no-print.
+ *
+ * NOTE: the browser stamps its own URL/date header+footer on the page unless the
+ * operator unchecks "Headers and footers" in the print dialog. No stylesheet can
+ * suppress that - it is a one-time per-machine setting on each counter PC.
  */
 @media print {
   @page {
-    margin: 14mm;
+    /* The top band is RESERVED, not padding: these sheets go through a printer
+       loaded with pre-printed hospital letterhead, and content in this band would
+       land on top of it. 40mm mirrors LETTERHEAD_TOP_MM, the same reserve the pdfme
+       templates ship with (lib/printing/defaults/build.ts) - keep the two in step.
+       Unlike the pdfme path this is NOT admin-tunable per design; it is a constant. */
+    margin: 40mm 14mm 14mm;
   }
   body {
     background: #fff;

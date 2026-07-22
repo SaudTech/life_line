@@ -81,10 +81,19 @@ export interface EndDayDocument {
   voidsText: string; // "1,200.00 (2)" - voided amount + count
   advancesText: string; // admission deposits collected
   advancesCountText: string; // "3" - number of advances taken (pairs with advancesText's amount)
+  // Bills + advances, net of refunds - the figure that reconciles the physical till at
+  // close. grandTotalText is bills ONLY, so the two differ on any day with an admission.
+  moneyInText: string;
+  refundsText: string; // "400.00 (1)" - cash handed back at discharge + count
   activityTotalText: string; // "19" - total logged actions on the day
-  // Repeating rows for the designer's `table` fields (mode / type / activity).
+  // Repeating rows for the designer's `table` fields (mode / type / deposits / activity).
   modeRows: { mode: string; count: string; amountText: string }[];
   typeRows: { label: string; count: string; amountText: string }[];
+  // Admission deposits split by payment mode. advancesText is only the TOTAL, and a
+  // total is not enough to count a drawer: cash deposits are physically in the till
+  // while card/UPI deposits are not, so the split has to reach paper too - the
+  // on-screen sheet shows it for exactly this reason.
+  advanceModeRows: { mode: string; count: string; amountText: string }[];
   activityRows: { label: string; count: string }[];
 }
 

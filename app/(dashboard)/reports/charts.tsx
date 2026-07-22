@@ -112,12 +112,19 @@ export function MoneyBarChart({ lines }: { lines: ReportLine[] }) {
 // Donut of the payment-mode composition (share of the drawer), teal ramp light→dark,
 // with the grand total in the centre and a labelled legend beside it (identity is
 // never colour-alone). Only non-zero modes get a slice; a no-money day shows a note.
+//
+// `showLegend={false}` is for a caller that ALREADY prints every mode as text next to
+// it (the report sheet's by-mode ledger) - there the legend would restate the same
+// figures twice, side by side. Never pass it when the donut stands alone: the slices
+// would then carry identity on colour alone, which §5 forbids.
 export function PaymentModeDonut({
   lines,
   totalPaise,
+  showLegend = true,
 }: {
   lines: ReportLine[];
   totalPaise: number;
+  showLegend?: boolean;
 }) {
   const mounted = useMounted();
   const slices = lines
@@ -167,19 +174,21 @@ export function PaymentModeDonut({
       </div>
 
       {/* Legend: swatch + mode + amount + share, so identity never rides colour alone. */}
-      <ul className="flex min-w-[160px] flex-1 flex-col gap-2">
-        {slices.map((s) => {
-          const pct = Math.round((s.totalPaise / totalPaise) * 100);
-          return (
-            <li key={s.key} className="flex items-center gap-2.5 text-sm">
-              <span className="size-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: s.color }} aria-hidden />
-              <span className="flex-1 truncate text-foreground">{s.label}</span>
-              <span className="tabular-nums font-semibold text-foreground">₹{formatPaise(s.totalPaise)}</span>
-              <span className="w-9 text-right tabular-nums text-xs text-muted-foreground">{pct}%</span>
-            </li>
-          );
-        })}
-      </ul>
+      {showLegend ? (
+        <ul className="flex min-w-[160px] flex-1 flex-col gap-2">
+          {slices.map((s) => {
+            const pct = Math.round((s.totalPaise / totalPaise) * 100);
+            return (
+              <li key={s.key} className="flex items-center gap-2.5 text-sm">
+                <span className="size-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: s.color }} aria-hidden />
+                <span className="flex-1 truncate text-foreground">{s.label}</span>
+                <span className="tabular-nums font-semibold text-foreground">₹{formatPaise(s.totalPaise)}</span>
+                <span className="w-9 text-right tabular-nums text-xs text-muted-foreground">{pct}%</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 }

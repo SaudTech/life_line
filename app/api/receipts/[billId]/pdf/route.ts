@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { generate } from "@pdfme/generator";
+import { loadPdfFonts, withRenderableFonts } from "@/lib/printing/fonts-loader";
 import { requireSession } from "@/lib/auth/dal";
 import { getBillDocument } from "@/lib/printing/bill-document-repository";
 import { getActiveTemplate } from "@/lib/printing/repository";
@@ -51,13 +52,18 @@ export async function GET(
 
   const inputs = billDocumentToInputs(docForPrint);
 
-  // No `options.font` passed - pdfme's own bundled default (Roboto) already
-  // includes the ₹ glyph (verified directly: fontkit reports a real glyph, not
-  // .notdef, for U+20B9), so there's nothing to bundle here.
+  // The full receipt font catalog (lib/printing/fonts.ts), so a template designed in
+  // any offered face renders in that face here. Roboto remains the fallback, and
+  // every catalog font is asserted to carry the ₹ glyph (fonts.test.ts) - a face
+  // without U+20B9 would print every amount as a .notdef box.
+  // withRenderableFonts swaps out any fontName this machine cannot render, so a
+  // missing system font degrades to Roboto instead of throwing mid-queue.
+  const font = await loadPdfFonts();
   const pdf = await generate({
-    template: tpl.schema_json,
+    template: withRenderableFonts(tpl.schema_json, font),
     inputs: [inputs],
     plugins: PDF_PLUGINS,
+    options: { font },
   });
 
   return new NextResponse(Buffer.from(pdf), {

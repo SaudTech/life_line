@@ -30,6 +30,32 @@ export function clinicToday(now: Date = new Date()): string {
   }).format(now);
 }
 
+// The hour (0-23) at the clinic right now, for the time-of-day greeting. Server-local
+// `getHours()` is NOT this: on a UTC host it reads 5.5 hours behind, so the header said
+// "Good afternoon" beside cards computed for the real IST evening. Anything shown next
+// to a clinic-day figure must be reckoned on the clinic's clock (§5, honest state).
+export function clinicHour(now: Date = new Date()): number {
+  const hh = new Intl.DateTimeFormat("en-GB", {
+    timeZone: CLINIC_TZ,
+    hour: "2-digit",
+    hour12: false,
+  }).format(now);
+  // en-GB renders midnight as "24" in some ICU versions; normalise it to 0.
+  return Number(hh) % 24;
+}
+
+// The clinic's date, spelled out for the dashboard header ("Monday, July 14"). Same
+// reason as clinicHour: server-local formatting shows YESTERDAY between 00:00 and
+// 05:30 IST on a UTC host, directly above a "Revenue today" card for the real today.
+export function clinicDateLabel(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: CLINIC_TZ,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+}
+
 // Add (or subtract) whole days to an ISO day, staying on UTC midnight so no DST
 // or timezone offset can nudge the result onto the wrong date.
 export function addDays(iso: string, days: number): string {

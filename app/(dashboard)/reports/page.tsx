@@ -37,9 +37,8 @@ export default async function ReportsPage() {
     );
   }
 
-  // Server-resolved: is there an End-Day design a print can use for this location?
-  // Gates the Print button (print-updates plan §1c/§4c). The on-screen report always
-  // renders for reading; only the printed A4 sheet depends on a template existing.
+  // Gates the PDF button ONLY - is there an `end_day` design to render through?
+  // The browser Print button is ungated: it prints the DOM, which always exists.
   const printable = locationId ? await hasPrintableTemplate("end_day", locationId) : false;
 
   return (

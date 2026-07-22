@@ -18,7 +18,7 @@ function formatYAxis(value: number): string {
   // 1 Crore = 100,000,000 paise
   // 1 Lakh = 10,000,000 paise
   if (value >= 100000000) {
-    return `${(value / 100000000).toFixed(1)}C`;
+    return `${(value / 100000000).toFixed(1)}Cr`;
   }
   if (value >= 10000000) {
     return `${(value / 10000000).toFixed(1)}L`;
@@ -28,6 +28,10 @@ function formatYAxis(value: number): string {
 }
 
 export function RevenueChart({ data, title, total }: RevenueChartProps) {
+  // Recharts paints into SVG and can't read a CSS custom property, so the token is
+  // resolved from the document once on mount. The initial value MUST stay in step with
+  // --primary in globals.css (brand indigo): it is what SSR and the first client paint
+  // use, so a stale default here shows as a colour flash on every load.
   const [primaryColor, setPrimaryColor] = useState("#2e3192");
 
   useEffect(() => {
@@ -48,8 +52,16 @@ export function RevenueChart({ data, title, total }: RevenueChartProps) {
     );
   }
 
+  // `day` is a plain clinic day ('YYYY-MM-DD'), which Date parses as UTC midnight.
+  // Formatting it without an explicit timeZone would render it in the VIEWER's zone -
+  // a day early anywhere west of UTC, and different on the server than on the client
+  // (a hydration mismatch). Pinning UTC just reads the date back as written.
   const chartData = data.map((item) => ({
-    day: new Date(item.day).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    day: new Date(item.day).toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+    }),
     revenue: item.paise,
   }));
 
@@ -78,7 +90,7 @@ export function RevenueChart({ data, title, total }: RevenueChartProps) {
             <XAxis dataKey="day" stroke="#6b7280" style={{ fontSize: "12px" }} />
             <YAxis stroke="#6b7280" style={{ fontSize: "12px" }} tickFormatter={formatYAxis} />
             <Tooltip
-              formatter={(value: number) => `₹${formatPaise(value)}`}
+              formatter={(value) => `₹${formatPaise(Number(value))}`}
               contentStyle={{
                 backgroundColor: "#fff",
                 border: "1px solid #e5e7eb",

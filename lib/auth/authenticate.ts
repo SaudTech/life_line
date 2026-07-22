@@ -22,6 +22,12 @@ interface UserRow {
   location_id: string;
 }
 
+// Syntactically valid dummy scrypt hash: when the user row is missing we still
+// run a real verification against this, so response timing does not reveal
+// whether the login exists.
+const DUMMY_HASH =
+  "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
 // Any active staff member may now sign in; the role decides which home they land
 // on (see homePathForRole). Inactive ("trash") users are refused, indistinguishably
 // from wrong credentials.
@@ -32,12 +38,6 @@ export async function authenticateUser(phone: string, password: string): Promise
   );
 
   const user = rows[0];
-
-  // Always run a password verification, even when the user is missing or
-  // inactive, so response timing does not reveal whether the login exists.
-  // Uses a syntactically valid dummy scrypt hash so verifyPassword does real work.
-  const DUMMY_HASH =
-    "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   const passwordOk = await verifyPassword(password, user?.password_hash ?? DUMMY_HASH);
 
   if (!user || !user.active || !passwordOk) {
@@ -48,4 +48,19 @@ export async function authenticateUser(phone: string, password: string): Promise
     ok: true,
     user: { id: user.id, role: user.role, location_id: user.location_id },
   };
+}
+
+// Re-verify the SIGNED-IN user's current password by id (the self-service
+// password change proves possession before anything is written). Same
+// containment as authenticateUser: the hash is read and verified HERE and never
+// leaves this module (§10). Missing/inactive rows verify against the dummy hash
+// so the call always does the same work, and simply fail.
+export async function verifyCurrentPassword(userId: string, password: string): Promise<boolean> {
+  const { rows } = await pool.query<{ password_hash: string; active: boolean }>(
+    "SELECT password_hash, active FROM users WHERE id = $1",
+    [userId],
+  );
+  const user = rows[0];
+  const passwordOk = await verifyPassword(password, user?.password_hash ?? DUMMY_HASH);
+  return !!user && user.active && passwordOk;
 }

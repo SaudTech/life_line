@@ -38,9 +38,14 @@ export function PreviewDialog({
 
     (async () => {
       try {
-        const [{ generate }, { PDF_PLUGINS }] = await Promise.all([
+        // The preview MUST load the same fonts as the designer and the PDF routes.
+        // Without options.font, pdfme falls back to its embedded Roboto for every
+        // field - so a layout set in Georgia would preview in Roboto and an admin
+        // would be trusting a picture of a receipt that is not the receipt (§5).
+        const [{ generate }, { PDF_PLUGINS }, { loadDesignerFonts }] = await Promise.all([
           import("@pdfme/generator"),
           import("@/lib/printing/pdf-plugins"),
+          import("@/lib/printing/fonts-client"),
         ]);
         const doc = sampleBillDocument(type);
         const inputs = billDocumentToInputs(doc);
@@ -48,6 +53,7 @@ export function PreviewDialog({
           template,
           inputs: [inputs],
           plugins: PDF_PLUGINS,
+          options: { font: await loadDesignerFonts() },
         });
         if (cancelled) return;
         const blob = new Blob([new Uint8Array(pdf)], { type: "application/pdf" });

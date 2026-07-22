@@ -24,10 +24,13 @@ export interface UserListRow {
   created_at: Date;
 }
 
-// All users (active AND inactive) - the client filters. Ordered by name for a
-// stable, muscle-memory grid. `permissions` is not a secret (unlike the hashes),
-// so the client can render the granted checkboxes.
-export async function listUsers(): Promise<UserListRow[]> {
+// All users at ONE location (active AND inactive) - the client filters. Ordered by
+// name for a stable, muscle-memory grid. `permissions` is not a secret (unlike the
+// hashes), so the client can render the granted checkboxes. Location-scoped (§4): an
+// admin manages their own branch's staff, and the supervisor_name join deliberately
+// stays unscoped so an already-assigned cross-branch supervisor still renders a name
+// rather than a blank.
+export async function listUsers(locationId: string): Promise<UserListRow[]> {
   const { rows } = await pool.query<UserListRow>(
     `SELECT u.id, u.name, u.phone, u.email, u.role, u.active,
             (u.pin_hash IS NOT NULL) AS has_pin, u.permissions,
@@ -35,7 +38,9 @@ export async function listUsers(): Promise<UserListRow[]> {
             u.created_at
        FROM users u
        LEFT JOIN users sup ON sup.id = u.supervisor_id
+      WHERE u.location_id = $1
       ORDER BY u.name ASC`,
+    [locationId],
   );
   return rows;
 }
@@ -124,14 +129,16 @@ export async function setUserPassword(
 // can create a procedure bill"), not every staff member.
 export async function listUsersWithPermission(
   permission: PermissionKey,
+  locationId: string,
 ): Promise<{ id: string; name: string }[]> {
   const { rows } = await pool.query<{ id: string; name: string }>(
     `SELECT id, name
        FROM users
       WHERE active
         AND (role = 'admin' OR $1 = ANY(permissions))
+        AND location_id = $2
       ORDER BY name`,
-    [permission],
+    [permission, locationId],
   );
   return rows;
 }
@@ -141,31 +148,38 @@ export async function listUsersWithPermission(
 // procedure bill" - the counter roles). Admin is included only if it's in the set.
 export async function listUsersByRole(
   roles: readonly Role[],
+  locationId: string,
 ): Promise<{ id: string; name: string }[]> {
   const { rows } = await pool.query<{ id: string; name: string }>(
     `SELECT id, name
        FROM users
       WHERE active
         AND role = ANY($1)
+        AND location_id = $2
       ORDER BY name`,
-    [roles as readonly string[]],
+    [roles as readonly string[], locationId],
   );
   return rows;
 }
 
-// Active supervisors/admins who hold a discount-approval PIN, with their pin_hash.
-// A discount PIN is verified by trying each hash (scrypt is salted per-row, so it
-// can't be looked up directly) - the matching row is the approver. SECURITY: the
-// hash never leaves the server; callers use it only with verifyPassword.
-export async function listDiscountApprovers(): Promise<
-  { id: string; name: string; pin_hash: string }[]
-> {
+// Active supervisors/admins AT ONE LOCATION who hold a discount-approval PIN, with
+// their pin_hash. A discount PIN is verified by trying each hash (scrypt is salted
+// per-row, so it can't be looked up directly) - the matching row is the approver.
+// SECURITY: the hash never leaves the server; callers use it only with verifyPassword.
+// The location filter is part of the authorization, not a display concern: approving a
+// discount is a decision about THIS branch's money, so only this branch's supervisors
+// are candidates (§8). Unscoped, one branch's PIN silently worked at another's counter.
+export async function listDiscountApprovers(
+  locationId: string,
+): Promise<{ id: string; name: string; pin_hash: string }[]> {
   const { rows } = await pool.query<{ id: string; name: string; pin_hash: string }>(
     `SELECT id, name, pin_hash
        FROM users
       WHERE active
         AND pin_hash IS NOT NULL
-        AND role IN ('supervisor', 'admin')`,
+        AND role IN ('supervisor', 'admin')
+        AND location_id = $1`,
+    [locationId],
   );
   return rows;
 }
@@ -273,13 +287,19 @@ export const getUserProfile = cache(
   },
 );
 
-export async function getUserStats(): Promise<UserStats> {
+// Staff counts for ONE location - never the whole company. Scoping these is the
+// `location_id`-from-day-one rule (§4): with one branch it reads the same either way,
+// but on the day a second branch exists an unscoped count silently reports another
+// branch's staff to this admin, and by then nobody remembers to look here.
+export async function getUserStats(locationId: string): Promise<UserStats> {
   const { rows } = await pool.query<UserStats>(
     `SELECT count(*)::int                                    AS total,
             count(*) FILTER (WHERE active)::int              AS active,
             count(*) FILTER (WHERE role = 'supervisor')::int AS supervisors,
             count(*) FILTER (WHERE NOT active)::int          AS archived
-       FROM users`,
+       FROM users
+      WHERE location_id = $1`,
+    [locationId],
   );
   return rows[0];
 }
@@ -310,7 +330,14 @@ export interface ActivityRow {
   details: Record<string, unknown> | null;
 }
 
-export async function listRecentActivity(limit = 6): Promise<ActivityRow[]> {
+// Scoped to ONE location (§4), tolerant of the rare pre-location audit row - the same
+// `location_id = $2 OR location_id IS NULL` shape the report's getActivityCounts uses,
+// so an old row is still visible to somebody rather than lost. Without the filter this
+// feed showed every branch's activity to every admin.
+export async function listRecentActivity(
+  locationId: string,
+  limit = 6,
+): Promise<ActivityRow[]> {
   const { rows } = await pool.query<ActivityRow>(
     `SELECT a.id::text                        AS id,
             a.action,
@@ -324,9 +351,10 @@ export async function listRecentActivity(limit = 6): Promise<ActivityRow[]> {
        LEFT JOIN doctors  td ON td.id = (CASE WHEN a.entity = 'doctor'  THEN a.target_id END)::bigint
        LEFT JOIN patients tp ON tp.id = (CASE WHEN a.entity = 'patient' THEN a.target_id END)::bigint
        LEFT JOIN services ts ON ts.id = (CASE WHEN a.entity = 'service' THEN a.target_id END)::bigint
+      WHERE a.location_id = $2 OR a.location_id IS NULL
       ORDER BY a.at DESC
       LIMIT $1`,
-    [limit],
+    [limit, locationId],
   );
   return rows;
 }

@@ -214,15 +214,23 @@ export function box(
 
 // A table field bound to a receipt field-catalog key (items / expenses).
 // `sampleRows` is the placeholder content shown in the Designer canvas.
+// `overrides` restyles the table wholesale - the End-Day sheet passes a ledger
+// look (hairline row rules, no zebra, right-aligned amount columns) in place of
+// the boxed blue-header default. Column alignment lives under
+// `columnStyles.alignment`, keyed by ZERO-BASED column index (@pdfme/schemas
+// tables/types.d.ts) - money columns must be right-aligned or the digits do not
+// line up down the page, which is the entire point of a ledger.
 export function tableField(
   key: string,
   head: string[],
   headWidthPercentages: number[],
   sampleRows: string[][],
   position: { x: number; y: number; w: number; h: number },
+  overrides: Partial<typeof TABLE_DEFAULTS> = {},
 ) {
   return {
     ...TABLE_DEFAULTS,
+    ...overrides,
     name: key,
     head,
     headWidthPercentages,

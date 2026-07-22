@@ -132,9 +132,18 @@ const END_DAY_FIELDS: FieldMeta[] = [
   labeled("voidsText", "Voids (amount + count)", "1,200.00 (2)", "Voids"),
   labeled("advancesText", "Admission advances", "5,000.00", "Advances"),
   labeled("advancesCountText", "Advances count", "1", "Advances count"),
+  // Bills + advances, net of refunds: the figure that must match the physical till at
+  // close. grandTotalText is bills ONLY, so on a day with any admission the two differ
+  // and only this one reconciles the drawer.
+  labeled("moneyInText", "Money in (bills + advances)", "17,450.00", "Money in"),
+  // "Less ..." because this is a DEDUCTION in the money-in working, not a footnote:
+  // cash handed back where an advance exceeded the final bill. The sheet subtracts it
+  // once (lib/reports/summary.ts); the label has to say which way the money went.
+  labeled("refundsText", "Refunds paid (amount + count)", "400.00 (1)", "Less refunds paid"),
   labeled("activityTotalText", "Total actions", "19", "Actions"),
   { key: "modeTable", label: "By payment mode (table)", sample: "", kind: "table" },
   { key: "typeTable", label: "By bill type (table)", sample: "", kind: "table" },
+  { key: "advanceModeTable", label: "Admission deposits by mode (table)", sample: "", kind: "table" },
   { key: "activityTable", label: "Activity (table)", sample: "", kind: "table" },
 ];
 
@@ -219,6 +228,8 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
       voidsText: "₹1,200.00 (2)",
       advancesText: "₹5,000.00",
       advancesCountText: "1",
+      moneyInText: "₹17,450.00",
+      refundsText: "₹400.00 (1)",
       activityTotalText: "19",
       modeRows: [
         { mode: "Cash", count: "11", amountText: "₹7,200.00" },
@@ -230,6 +241,12 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
         { label: "Consultation", count: "12", amountText: "₹6,000.00" },
         { label: "Procedure", count: "5", amountText: "₹4,450.00" },
         { label: "In-patient", count: "1", amountText: "₹2,000.00" },
+      ],
+      advanceModeRows: [
+        { mode: "Cash", count: "1", amountText: "₹5,000.00" },
+        { mode: "Card", count: "0", amountText: "₹0.00" },
+        { mode: "UPI", count: "0", amountText: "₹0.00" },
+        { mode: "Other", count: "0", amountText: "₹0.00" },
       ],
       activityRows: [
         { label: "Patients registered", count: "4" },
@@ -333,9 +350,14 @@ function endDayRaw(doc: EndDayDocument): Record<string, string> {
     voidsText: doc.voidsText,
     advancesText: doc.advancesText,
     advancesCountText: doc.advancesCountText,
+    moneyInText: doc.moneyInText,
+    refundsText: doc.refundsText,
     activityTotalText: doc.activityTotalText,
     modeTable: JSON.stringify(doc.modeRows.map((r) => [r.mode, r.count, r.amountText])),
     typeTable: JSON.stringify(doc.typeRows.map((r) => [r.label, r.count, r.amountText])),
+    advanceModeTable: JSON.stringify(
+      doc.advanceModeRows.map((r) => [r.mode, r.count, r.amountText]),
+    ),
     activityTable: JSON.stringify(doc.activityRows.map((r) => [r.label, r.count])),
   };
 }

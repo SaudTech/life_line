@@ -19,9 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/admin/activity";
 import type { BillType } from "@/lib/printing/fields";
-import type { TemplateSummary } from "@/lib/printing/repository";
 import {
   activateTemplateAction,
   createTemplateAction,
@@ -42,18 +40,29 @@ import { PreviewDialog } from "./preview-dialog";
 // Every designable type ships a default. End-Day is a first-class designable
 // report template printed through the same pipeline (print-updates plan §4);
 // `advance` is intentionally absent - it ships no default/catalog (plan §5).
-const SECTIONS: { type: BillType; label: string; disabled?: boolean }[] = [
+const SECTIONS: { type: BillType; label: string }[] = [
   { type: "consultation", label: "Consultation" },
   { type: "procedure", label: "Procedure" },
   { type: "ip", label: "IP" },
   { type: "end_day", label: "End-of-day report" },
 ];
 
+// One design card's data, pre-formatted by the server page. `updatedLabel` is
+// rendered there (not here) because a client-computed `now` would disagree with
+// the server's and mismatch on hydration.
+export interface DesignRow {
+  id: string;
+  name: string;
+  bill_type: BillType;
+  is_active: boolean;
+  updatedLabel: string;
+}
+
 type RenameState = { id: string; name: string } | null;
 type DeleteState = { id: string; name: string } | null;
 type PreviewState = { type: BillType; template: Template } | null;
 
-export function ReceiptsLibrary({ templates }: { templates: TemplateSummary[] }) {
+export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -67,20 +76,16 @@ export function ReceiptsLibrary({ templates }: { templates: TemplateSummary[] })
   // already gone from the server linger harmlessly (serial ids never reuse).
   const [removedIds, setRemovedIds] = useState<ReadonlySet<string>>(new Set());
 
-  // `now` is captured once per render for relative times - fine for a list view;
-  // exact-to-the-second freshness isn't needed and would only cause churn.
-  const now = useMemo(() => new Date(), [templates]);
-
   const byType = useMemo(() => {
-    const map = new Map<BillType, TemplateSummary[]>();
-    for (const t of templates) {
+    const map = new Map<BillType, DesignRow[]>();
+    for (const t of allDesigns) {
       if (removedIds.has(t.id)) continue;
       const list = map.get(t.bill_type) ?? [];
       list.push(t);
       map.set(t.bill_type, list);
     }
     return map;
-  }, [templates, removedIds]);
+  }, [allDesigns, removedIds]);
 
   function newDesign(type: BillType) {
     startTransition(async () => {
@@ -163,7 +168,7 @@ export function ReceiptsLibrary({ templates }: { templates: TemplateSummary[] })
     });
   }
 
-  async function openPreview(row: TemplateSummary) {
+  async function openPreview(row: DesignRow) {
     setBusyId(row.id);
     const res = await getTemplateAction({ id: row.id });
     setBusyId(null);
@@ -206,35 +211,23 @@ export function ReceiptsLibrary({ templates }: { templates: TemplateSummary[] })
                   <h2 className="text-sm font-semibold tracking-wide text-foreground uppercase">
                     {section.label}
                   </h2>
-                  {section.disabled ? (
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                      Coming soon
-                    </span>
-                  ) : (
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {designs.length} design{designs.length === 1 ? "" : "s"}
-                    </span>
-                  )}
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {designs.length} design{designs.length === 1 ? "" : "s"}
+                  </span>
                 </div>
-                {section.disabled ? null : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => newDesign(section.type)}
-                    disabled={pending}
-                  >
-                    <Plus aria-hidden />
-                    New design
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => newDesign(section.type)}
+                  disabled={pending}
+                >
+                  <Plus aria-hidden />
+                  New design
+                </Button>
               </div>
 
-              {section.disabled ? (
-                <p className="rounded-xl border border-dashed bg-card/40 px-6 py-8 text-center text-sm font-medium text-muted-foreground">
-                  In-patient receipts aren&apos;t available yet.
-                </p>
-              ) : designs.length === 0 ? (
+              {designs.length === 0 ? (
                 <p className="rounded-xl border border-dashed bg-card/40 px-6 py-8 text-center text-sm font-medium text-muted-foreground">
                   No designs yet. Create one to start printing {section.label.toLowerCase()} receipts.
                 </p>
@@ -244,7 +237,6 @@ export function ReceiptsLibrary({ templates }: { templates: TemplateSummary[] })
                     <DesignCard
                       key={row.id}
                       row={row}
-                      now={now}
                       busy={busyId === row.id || pending}
                       canDelete={!row.is_active && !onlyOne}
                       onSetActive={() => setActive(row.id)}
@@ -300,7 +292,6 @@ const cardBtn =
 
 function DesignCard({
   row,
-  now,
   busy,
   canDelete,
   onSetActive,
@@ -309,8 +300,7 @@ function DesignCard({
   onPreview,
   onDelete,
 }: {
-  row: TemplateSummary;
-  now: Date;
+  row: DesignRow;
   busy: boolean;
   canDelete: boolean;
   onSetActive: () => void;
@@ -340,7 +330,7 @@ function DesignCard({
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold text-foreground">{row.name}</div>
           <div className="text-xs font-medium text-muted-foreground">
-            Updated {relativeTime(new Date(row.updated_at), now)}
+            Updated {row.updatedLabel}
           </div>
         </div>
         {row.is_active ? (

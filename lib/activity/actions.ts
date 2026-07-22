@@ -27,6 +27,7 @@ export const ACTIVITY = {
   "user.create":          { label: "New staff created",         tone: "success" },
   "user.update":          { label: "Staff account updated",     tone: "accent"  },
   "user.password_reset":  { label: "Password reset",            tone: "warning" },
+  "user.password_change": { label: "Password changed",          tone: "accent"  }, // self-service - actor and target are the same user
   "user.pin_set":         { label: "Discount PIN set",          tone: "accent"  },
   "user.pin_clear":       { label: "Discount PIN cleared",      tone: "accent"  },
   "user.deactivate":      { label: "Staff account deactivated", tone: "danger"  },

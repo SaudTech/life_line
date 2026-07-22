@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef } from "react";
-import type { Template } from "@pdfme/common";
+import { getDefaultFont, type Template } from "@pdfme/common";
 import { Designer } from "@pdfme/ui";
 import { PDF_PLUGINS } from "@/lib/printing/pdf-plugins";
+import { loadDesignerFonts } from "@/lib/printing/fonts-client";
 
 // Thin wrapper around pdfme's Designer class component. Client-only by
 // construction (it mounts pdfme into a raw DOM node) - the parent loads this
@@ -55,17 +56,33 @@ export function ReceiptDesigner({
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const designer = new Designer({
-      domContainer: containerRef.current,
-      template: initialTemplate,
-      plugins: PDF_PLUGINS,
-      // pdfme's own zoom cap defaults to 200% (options.maxZoom is a percent,
-      // e.g. 400 = 400%) - raised so fine label/positioning work is easier.
-      options: { maxZoom: 400 },
-    });
-    designerRef.current = designer;
+    let designer: Designer | null = null;
+    let cancelled = false;
+
+    // Fonts must be in hand BEFORE the Designer is constructed: pdfme reads
+    // options.font once, at construction, so faces cannot be added to a live
+    // instance. Without this the font picker offers only Roboto, which is the single
+    // face @pdfme/common embeds. If the fetch fails we still mount, on Roboto alone -
+    // a designer that opens beats a blank screen.
+    void loadDesignerFonts()
+      .catch(() => getDefaultFont())
+      .then((font) => {
+        const container = containerRef.current;
+        if (cancelled || !container) return;
+        designer = new Designer({
+          domContainer: container,
+          template: initialTemplate,
+          plugins: PDF_PLUGINS,
+          // pdfme's own zoom cap defaults to 200% (options.maxZoom is a percent,
+          // e.g. 400 = 400%) - raised so fine label/positioning work is easier.
+          options: { maxZoom: 400, font },
+        });
+        designerRef.current = designer;
+      });
+
     return () => {
-      designer.destroy();
+      cancelled = true;
+      designer?.destroy();
       designerRef.current = null;
     };
     // Mount once - initialTemplate is only the STARTING template; later swaps
