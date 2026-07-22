@@ -18,7 +18,7 @@ export async function GET(
   { params }: { params: Promise<{ billId: string }> },
 ) {
   // Receipts carry patient data - never served anonymously (print plan §3.1).
-  await requireSession();
+  const session = await requireSession();
 
   const { billId } = await params;
 
@@ -27,6 +27,17 @@ export async function GET(
     doc = await getBillDocument(billId);
   } catch {
     return new NextResponse("Receipt not found.", { status: 404 });
+  }
+
+  // Reprinting a consultation/procedure bill (copy=duplicate) is supervisor/admin
+  // only - the desk (op_desk/op_ip_desk) can still fetch the ORIGINAL print (no
+  // copy param) right after billing. Hiding the history pages' Print button is
+  // not security, so this is the authoritative check; it's scoped to these two
+  // bill types only - an IP invoice's "reprint when viewed later" is unaffected.
+  const isDuplicateRequest = req.nextUrl.searchParams.get("copy") === "duplicate";
+  const isDeskRole = session.role === "op_desk" || session.role === "op_ip_desk";
+  if (isDuplicateRequest && isDeskRole && (doc.type === "consultation" || doc.type === "procedure")) {
+    return new NextResponse("Reprints are restricted to supervisors and admins.", { status: 403 });
   }
 
   // The bill's OWN location picks the template, not the viewer's (multi-branch

@@ -44,6 +44,10 @@ export const ACTIVITY = {
   "doctor.activate":      { label: "Doctor reactivated",        tone: "success" },
   "doctor.deactivate":    { label: "Doctor deactivated",        tone: "danger"  },
 
+  // ── Departments ────────────────────────────────────────────────────────
+  "department.create":     { label: "Department added",         tone: "success" },
+  "department.delete":     { label: "Department removed",       tone: "danger"  },
+
   // ── Services / items ───────────────────────────────────────────────────
   "service.create":       { label: "Service added",             tone: "success" },
   "service.update":       { label: "Service updated",           tone: "accent"  },
@@ -86,6 +90,9 @@ export const ACTIVITY = {
   "receipt.template_duplicated": { label: "Receipt design duplicated", tone: "accent" },
   "receipt.template_deleted":    { label: "Receipt design deleted",    tone: "danger" },
   "receipt.template_reset": { label: "Receipt template reset to default", tone: "accent" },
+
+  // ── Suggestions ────────────────────────────────────────────────────────
+  "suggestion.create":     { label: "Suggestion submitted",     tone: "accent"  },
 
   // ── System ─────────────────────────────────────────────────────────────
   "system.first_run_admin": { label: "Initial admin created",   tone: "accent"  },

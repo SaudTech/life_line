@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, X } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -46,6 +46,19 @@ export const Combobox = forwardRef<
     onBlur?: () => void;
     // Custom trigger text for the selected option (defaults to its label).
     renderValue?: (option: ComboboxOption) => ReactNode;
+    // Opt-in inline "manage the list" affordances - used by master-list pickers
+    // that would otherwise need a whole separate admin page (e.g. departments).
+    // Both are no-ops on every other Combobox in the app (undefined by default),
+    // so this never changes existing behaviour. onCreate is awaited: while it's
+    // pending the row shows a spinner state and can't be re-triggered; a thrown
+    // error keeps the popover open with the search text intact so the caller's
+    // toast is the only feedback the user needs. onCreate is responsible for
+    // adding the new option to `options` and/or calling onChange - the Combobox
+    // itself only closes the popover on success.
+    onCreate?: (name: string) => void | Promise<void>;
+    createLabel?: (query: string) => string;
+    onRemove?: (option: ComboboxOption) => void | Promise<void>;
+    removeLabel?: string;
   }
 >(function Combobox(
   {
@@ -62,11 +75,38 @@ export const Combobox = forwardRef<
     invalid,
     onBlur,
     renderValue,
+    onCreate,
+    createLabel,
+    onRemove,
+    removeLabel = "Remove",
   },
   ref,
 ) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
   const selected = options.find((o) => o.value === value);
+
+  const trimmedSearch = search.trim();
+  const hasExactMatch = options.some(
+    (o) => o.label.toLowerCase() === trimmedSearch.toLowerCase(),
+  );
+  const showCreateRow = Boolean(onCreate) && trimmedSearch.length > 0 && !hasExactMatch;
+
+  async function handleCreate() {
+    if (!onCreate || creating) return;
+    setCreating(true);
+    try {
+      await onCreate(trimmedSearch);
+      setSearch("");
+      setOpen(false);
+    } catch {
+      // The caller's action already surfaced the error (e.g. a toast); leave the
+      // popover open with the typed name so the user can just retry.
+    } finally {
+      setCreating(false);
+    }
+  }
 
   // Type-ahead: while the (closed) trigger is focused, typing searches and
   // commits the best match immediately - no click/Enter needed. Each keystroke
@@ -110,7 +150,13 @@ export const Combobox = forwardRef<
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setSearch("");
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           ref={ref}
@@ -139,9 +185,13 @@ export const Combobox = forwardRef<
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] bg-white p-0">
         <Command className="bg-white">
-          <CommandInput placeholder={searchPlaceholder} />
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
-            <CommandEmpty>{emptyText}</CommandEmpty>
+            {!showCreateRow ? <CommandEmpty>{emptyText}</CommandEmpty> : null}
             <CommandGroup>
               {clearLabel ? (
                 <CommandItem
@@ -173,8 +223,43 @@ export const Combobox = forwardRef<
                   />
                   <span className="flex-1 truncate">{o.label}</span>
                   {o.hint ? <span className="text-xs text-muted-foreground">{o.hint}</span> : null}
+                  {onRemove ? (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      aria-label={`${removeLabel} ${o.label}`}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onRemove(o);
+                      }}
+                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <X className="size-3.5" aria-hidden />
+                    </span>
+                  ) : null}
                 </CommandItem>
               ))}
+              {showCreateRow ? (
+                <CommandItem
+                  value={`__create__ ${trimmedSearch}`}
+                  disabled={creating}
+                  onSelect={handleCreate}
+                >
+                  <Plus className="size-4 text-muted-foreground" aria-hidden />
+                  <span className="flex-1 truncate">
+                    {creating
+                      ? "Adding…"
+                      : createLabel
+                        ? createLabel(trimmedSearch)
+                        : `Add "${trimmedSearch}"`}
+                  </span>
+                </CommandItem>
+              ) : null}
             </CommandGroup>
           </CommandList>
         </Command>

@@ -7,10 +7,23 @@
 
 // Up to ~99 lakh rupees, at most two decimal places. Deliberately strict so
 // "1.234", "-5", "", "abc" and "1." are all rejected before we ever compute.
-const RUPEES_RE = /^\d{1,7}(\.\d{1,2})?$/;
+const MAX_RUPEES_DIGITS = 7;
+const RUPEES_RE = new RegExp(`^\\d{1,${MAX_RUPEES_DIGITS}}(\\.\\d{1,2})?$`);
+export const MAX_RUPEES = Number("9".repeat(MAX_RUPEES_DIGITS)); // 9,999,999
 
 export function isValidRupees(input: string): boolean {
   return RUPEES_RE.test(input.trim());
+}
+
+// True when the input is shaped like a rupee amount (digits, optional 2-decimal
+// fraction) but its whole-rupee part is over the cap - lets a caller tell "too
+// large" apart from "not a number at all" for a clearer inline error, without
+// duplicating RUPEES_RE's shape.
+const RUPEES_SHAPE_RE = /^\d+(\.\d{1,2})?$/;
+
+export function isRupeesTooLarge(input: string): boolean {
+  const s = input.trim();
+  return RUPEES_SHAPE_RE.test(s) && s.split(".")[0].length > MAX_RUPEES_DIGITS;
 }
 
 // "250" → 25000, "250.5" → 25050, "250.55" → 25055, "0" → 0. Throws on any input

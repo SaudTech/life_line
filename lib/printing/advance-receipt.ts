@@ -1,16 +1,15 @@
 import { formatRupees } from "@/lib/money";
+import { fieldKind } from "./fields";
 import { amountInWords } from "./amount-in-words";
 
 // PURE render-model + input mapping for the A4 "Advance Deposit Receipt" (plan
 // §5b) - the patient's proof of the advance handed over at admission. This is NOT
-// a `bills` row (no bill exists until discharge), so it has its OWN small,
-// self-contained field set rather than the bill field catalog. Kept pure (no DB)
-// so it's unit-testable; the DB resolver lives in ./advance-receipt-repository.
-//
-// The template (lib/printing/defaults/advance-receipt.ts) is a built-in FIXED A4
-// layout of plain text + static captions, so each value maps to its field name
-// verbatim (no multiVariableText wrapping). Reuses the same formatPaise +
-// amount-in-words + clinic-tz date + hospital letterhead as BillDocument.
+// a `bills` row (no bill exists until discharge), so it has its OWN document
+// shape; its designable field set is the `advance` catalog in ./fields (the
+// designer's palette, save validation, and this mapping all read that ONE
+// registry). Kept pure (no DB) so it's unit-testable; the DB resolver lives in
+// ./advance-receipt-repository. Reuses the same formatPaise + amount-in-words +
+// clinic-tz date + hospital letterhead as BillDocument.
 
 const PAYMENT_MODE_LABELS: Record<string, string> = {
   cash: "Cash",
@@ -87,11 +86,15 @@ export function buildAdvanceReceiptDocument(core: AdvanceReceiptCore): AdvanceRe
   };
 }
 
-// Flatten to the string map pdfme's generate({ template, inputs }) expects, keyed
-// by exactly the template's field names (advance-receipt default template). Plain
-// text fields take the raw value - no labeled/JSON wrapping.
+// Flatten to the string map pdfme's generate({ template, inputs }) expects,
+// keyed by exactly the `advance` field catalog's keys (./fields). The wire shape
+// per key is decided by that catalog's kind - the SAME rule billDocumentToInputs
+// applies - so a designed field and its input can never silently disagree:
+//   - "plain"   → the raw value, verbatim (the big amount, letterhead, footer).
+//   - "labeled" → JSON.stringify({ [key]: value }) - pdfme's multiVariableText
+//     input format, substituted into the field's "<Label>: {key}" text.
 export function advanceReceiptToInputs(doc: AdvanceReceiptDocument): Record<string, string> {
-  return {
+  const raw: Record<string, string> = {
     hospitalName: doc.hospital.name,
     hospitalTagline: doc.hospital.tagline ?? "",
     hospitalAddress: doc.hospital.address ?? "",
@@ -102,9 +105,41 @@ export function advanceReceiptToInputs(doc: AdvanceReceiptDocument): Record<stri
     patientName: doc.patient.name,
     patientAgeGender: doc.patient.ageGender ?? "",
     patientPhone: doc.patient.phone ?? "",
-    advanceText: doc.advanceText,
-    advanceInWords: doc.advanceInWords,
     paymentModeLabel: doc.paymentModeLabel ?? "",
+    advanceAmountText: doc.advanceText,
+    advanceInWords: doc.advanceInWords,
     footerNote: doc.footerNote ?? "",
+  };
+  const inputs: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    inputs[key] = fieldKind(key) === "labeled" ? JSON.stringify({ [key]: value }) : value;
+  }
+  return inputs;
+}
+
+// Fixed fake data for the designer's "Preview" button (mirrors ./fields'
+// sampleBillDocument, which covers the bill types - advance isn't a
+// BillDocument, so its sample lives here beside its own document shape).
+export function sampleAdvanceReceiptDocument(): AdvanceReceiptDocument {
+  return {
+    locationId: "0", // sample data only - never a real location
+    hospital: {
+      name: "Life Line",
+      tagline: "A MULTI SPECIALITY HOSPITAL",
+      address: "Chandrayangutta 'X' Road, Hyderabad - 500 005",
+      phone: "Tel: 6309192617, 6309192618, 7382003300",
+    },
+    reference: "128",
+    admittedDateText: "01 Jul 2026",
+    patient: {
+      code: "LL000123",
+      name: "Asha Rao",
+      ageGender: "34 / Female",
+      phone: "9876543210",
+    },
+    advanceText: "₹5,000.00",
+    advanceInWords: "Five Thousand Rupees Only",
+    paymentModeLabel: "Cash",
+    footerNote: "This advance will be adjusted against the final bill at discharge.",
   };
 }

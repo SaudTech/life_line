@@ -29,9 +29,9 @@ export default async function AdmissionDetailPage({
   ]);
   if (!detail) notFound();
   // Server-resolved Print gates (print-updates plan §1c): the discharge invoice
-  // prints only with an active `ip` design; the advance receipt only with an active
-  // `advance` design - none ships (the client doesn't use advance receipts), so its
-  // buttons simply disappear.
+  // prints only with an active `ip` design; the advance receipt only with an
+  // active `advance` design. Both ship checked-in defaults, so these are true
+  // unless a design is somehow missing - then the button simply disappears.
   const [invoicePrintable, advancePrintable] = locationId
     ? await Promise.all([
         hasPrintableTemplate("ip", locationId),

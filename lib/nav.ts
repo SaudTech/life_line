@@ -23,6 +23,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "Reports" },
     { href: "/admin/receipts", label: "Receipt Templates" },
+    { href: "/admin/suggestions", label: "Suggestions" },
   ],
   // Supervisors approve discounts/voids inline (PIN) AND work the full counter -
   // OP consultations, procedures and IP admit/discharge, same as op_ip_desk. Each

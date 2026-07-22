@@ -74,7 +74,9 @@ export function ProceduresList({
   initial: ProcedureBillListRow[];
   creators: Creator[];
   services: ServiceRow[];
-  // Server-resolved Print gate for this location's procedure design (§1c).
+  // Server-resolved Print (reprint) gate: a design must exist for this
+  // location's procedure receipt AND the viewer must be supervisor/admin
+  // (op_desk/op_ip_desk lost reprint - they can still view, void, re-issue).
   printable: boolean;
 }) {
   const router = useRouter();

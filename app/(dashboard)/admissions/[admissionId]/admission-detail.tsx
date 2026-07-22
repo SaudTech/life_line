@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Eye, EyeOff, Loader2, Minus, Plus, Printer, ReceiptText, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, Loader2, Printer, ReceiptText, Trash2 } from "lucide-react";
 
 import {
   Dialog,
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { PaymentModeIcon } from "@/components/payment-mode-icon";
 import { printReceipt } from "@/components/print-receipt";
 import { ServiceCombobox } from "@/components/service-combobox";
+import { QtyField } from "@/components/qty-field";
 import { RoomChargeInput } from "@/components/room-charge-input";
 import { VoidBillDialog } from "@/components/void-bill-dialog";
 import { printAdvanceReceipt } from "@/components/print-advance-receipt";
@@ -65,7 +66,7 @@ export function AdmissionDetailView({
   detail: AdmissionDetail;
   services: ServiceRow[];
   // Server-resolved Print gates (print-updates plan §1c): the discharge invoice
-  // (ip design) and the advance receipt (advance design, none ships) respectively.
+  // (ip design) and the advance receipt (advance design) respectively.
   invoicePrintable: boolean;
   advancePrintable: boolean;
 }) {
@@ -725,14 +726,24 @@ function ExpenseRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The quantity as typed - a draft in front of the persisted expense.quantity,
+  // exactly like a procedure line's text state. Reset from the server value
+  // whenever it moves (a successful save, or a failed one reverting the row).
+  const [qtyText, setQtyText] = useState(String(expense.quantity));
   const serviceId = serviceIdFor(services, expense.item);
 
+  useEffect(() => {
+    setQtyText(String(expense.quantity));
+  }, [expense.quantity]);
+
   // serviceId omitted = keep this line's service, change the quantity only.
-  async function save(next: { serviceId?: string; quantity?: number }) {
+  // Returns whether the save actually went through, so a quantity commit can
+  // fall back to the last-known-good text on failure.
+  async function save(next: { serviceId?: string; quantity?: number }): Promise<boolean> {
     const quantity = next.quantity ?? expense.quantity;
-    if (busy || quantity < 1) return;
-    if (next.quantity === expense.quantity) return;
-    if (next.serviceId === serviceId) return;
+    if (busy || quantity < 1) return false;
+    if (next.quantity === expense.quantity) return true;
+    if (next.serviceId === serviceId) return true;
     setBusy(true);
     setError(null);
     try {
@@ -744,14 +755,28 @@ function ExpenseRow({
       });
       if (!res.ok) {
         setError(res.formError ?? Object.values(res.fieldErrors ?? {})[0] ?? "Could not update.");
-        return;
+        return false;
       }
       applyTally(res.data!);
+      return true;
     } catch {
       setError("Could not update - please try again.");
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  // The moment a typed quantity actually saves - arrow-step, Enter, or blur.
+  // Typing itself only updates qtyText (see QtyField's contract).
+  async function commitQty(text: string) {
+    const n = Number(text);
+    if (text === "" || !Number.isInteger(n) || n < 1 || n > 9999) {
+      setQtyText(String(expense.quantity));
+      return;
+    }
+    const ok = await save({ quantity: n });
+    if (!ok) setQtyText(String(expense.quantity));
   }
 
   async function remove() {
@@ -787,11 +812,11 @@ function ExpenseRow({
           // re-priced - show the stored name; remove is still available.
           <span className="min-w-0 flex-1 truncate text-foreground">{expense.item}</span>
         )}
-        <QtyStepper
-          quantity={expense.quantity}
-          busy={busy}
-          label={expense.item}
-          onChange={(quantity) => save({ quantity })}
+        <QtyField
+          value={qtyText}
+          onChange={setQtyText}
+          onCommit={commitQty}
+          label={`${expense.item} quantity`}
         />
         <span className="w-24 shrink-0 text-right font-semibold text-foreground">
           ₹{formatPaise(expense.total_paise)}
@@ -828,7 +853,7 @@ function DraftExpenseRow({
   applyTally: (t: ExpenseTally) => void;
   onAdded: () => void;
 }) {
-  const [qty, setQty] = useState(1);
+  const [qtyText, setQtyText] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const serviceRef = useRef<HTMLButtonElement>(null);
@@ -839,7 +864,8 @@ function DraftExpenseRow({
   }, [autoFocus]);
 
   async function pick(serviceId: string) {
-    if (!serviceId || busy) return;
+    const qty = Number(qtyText);
+    if (!serviceId || busy || !Number.isInteger(qty) || qty < 1) return;
     setBusy(true);
     setError(null);
     try {
@@ -868,7 +894,15 @@ function DraftExpenseRow({
           placeholder="Add an item…"
           className="min-w-0 flex-1"
         />
-        <QtyStepper quantity={qty} busy={busy} label="new item" onChange={setQty} />
+        <QtyField
+          value={qtyText}
+          onChange={setQtyText}
+          onCommit={(text) => {
+            const n = Number(text);
+            if (text === "" || !Number.isInteger(n) || n < 1 || n > 9999) setQtyText("1");
+          }}
+          label="new item quantity"
+        />
         <span className="w-24 shrink-0 text-right font-semibold text-muted-foreground">
           {busy ? <Loader2 className="ml-auto size-4 animate-spin" aria-hidden /> : "—"}
         </span>
@@ -880,44 +914,6 @@ function DraftExpenseRow({
   );
 }
 
-// −/qty/+ used by both a saved line and the blank row, so they stay identical.
-function QtyStepper({
-  quantity,
-  busy,
-  label,
-  onChange,
-}: {
-  quantity: number;
-  busy: boolean;
-  label: string;
-  onChange: (quantity: number) => void;
-}) {
-  return (
-    <div className="flex shrink-0 items-center rounded-lg border bg-background">
-      <button
-        type="button"
-        onClick={() => onChange(quantity - 1)}
-        disabled={busy || quantity <= 1}
-        aria-label={`Decrease ${label} quantity`}
-        className="flex size-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <Minus className="size-3.5" aria-hidden />
-      </button>
-      <span className="w-8 text-center text-sm font-medium tabular-nums text-foreground" aria-live="polite">
-        {busy ? <Loader2 className="mx-auto size-3.5 animate-spin" aria-hidden /> : quantity}
-      </span>
-      <button
-        type="button"
-        onClick={() => onChange(quantity + 1)}
-        disabled={busy || quantity >= 9999}
-        aria-label={`Increase ${label} quantity`}
-        className="flex size-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <Plus className="size-3.5" aria-hidden />
-      </button>
-    </div>
-  );
-}
 
 // A stored item-name snapshot back to its catalog service id, "" when that service
 // has since left the catalog.
@@ -946,7 +942,10 @@ function PatientHeader({ detail, status }: { detail: AdmissionDetail; status: "a
           {detail.patient_name} <span className="font-mono text-sm text-muted-foreground">{detail.patient_code}</span>
         </h1>
         <p className="text-xs text-muted-foreground">
-          Admitted {detail.admitted_label}
+          {/* Admission's own id (created at admit time - before any discharge
+              bill exists) - the reference to give staff while the patient is
+              still in-house, same role as consultation # for OPD. */}
+          Admission <span className="font-mono">#{detail.id}</span> · Admitted {detail.admitted_label}
           {detail.phone ? ` · ${detail.phone}` : ""}
         </p>
       </div>

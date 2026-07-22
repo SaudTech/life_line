@@ -38,6 +38,9 @@ export type ConsultationBillDocument = BillDocument & {
   doctorName: string;
   reason?: string;
   validUntilText: string;
+  // consultations.id, reused as the "consultation number" (plan
+  // procedures-part2-opd.md §4C) - not a separate generated sequence.
+  consultationNumber: string;
 };
 
 export type ProcedureBillDocument = BillDocument & {
@@ -79,6 +82,12 @@ export interface EndDayDocument {
   discountsText: string; // discount value given on the day's bills
   discountsApprovedText: string; // "450.00 (2)" - discounts I APPROVED (amount + count), a supervisor's own tally
   voidsText: string; // "1,200.00 (2)" - voided amount + count
+  // The consultation split (lib/reports/summary.ts): the doctors' summed cut of
+  // the day's consultation collections, and what the hospital keeps of them.
+  // Informational - the cut is still in the drawer (settled with the doctor
+  // later), so neither figure moves moneyInText.
+  doctorShareText: string; // "4,000.00" - total doctor share
+  hospitalShareText: string; // "6,000.00" - consultations less doctor share
   advancesText: string; // admission deposits collected
   advancesCountText: string; // "3" - number of advances taken (pairs with advancesText's amount)
   // Bills + advances, net of refunds - the figure that reconciles the physical till at
@@ -89,6 +98,11 @@ export interface EndDayDocument {
   // Repeating rows for the designer's `table` fields (mode / type / deposits / activity).
   modeRows: { mode: string; count: string; amountText: string }[];
   typeRows: { label: string; count: string; amountText: string }[];
+  // Per-doctor share rows. The seeded default template prints only the two split
+  // totals above (the fixed A4 flow has no room for an unbounded table), but the
+  // catalog exposes this so an admin can lay the per-doctor table into a custom
+  // design - the on-screen sheet shows these same rows.
+  doctorShareRows: { doctor: string; count: string; amountText: string }[];
   // Admission deposits split by payment mode. advancesText is only the TOTAL, and a
   // total is not enough to count a drawer: cash deposits are physically in the till
   // while card/UPI deposits are not, so the split has to reach paper too - the
@@ -163,7 +177,12 @@ export interface BillDocumentCore {
 // only; the testable logic lives in a pure function beside them).
 export function buildConsultationDocument(
   core: BillDocumentCore,
-  consultation: { doctorName: string; reason: string | null; validUntilText: string },
+  consultation: {
+    doctorName: string;
+    reason: string | null;
+    validUntilText: string;
+    consultationNumber: string;
+  },
 ): ConsultationBillDocument {
   return {
     ...buildCommon(core),
@@ -171,6 +190,7 @@ export function buildConsultationDocument(
     doctorName: consultation.doctorName,
     reason: consultation.reason ?? undefined,
     validUntilText: consultation.validUntilText,
+    consultationNumber: consultation.consultationNumber,
   };
 }
 

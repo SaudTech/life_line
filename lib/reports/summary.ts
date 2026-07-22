@@ -59,6 +59,21 @@ export interface ActivityCountRow {
   count: number;
 }
 
+// One doctor's cut of the day's consultation collections, summed per bill by the
+// ONE share rule (lib/doctors/share.ts) in the repository's grouped query. The
+// rate fields describe the doctor's CURRENT configuration (the rule prices at
+// report time, nothing is snapshotted) so the UI can say how the figure was
+// arrived at on the row itself.
+export interface DoctorShareRow {
+  doctorId: string;
+  doctorName: string;
+  shareType: string; // 'percentage' | 'flat'
+  sharePercentage: number; // whole percent (meaningful when shareType='percentage')
+  shareFlatPaise: number; // integer paise (meaningful when shareType='flat'; 0 otherwise)
+  count: number; // consultation bills for this doctor in scope
+  sharePaise: number; // the doctor's summed share, integer paise
+}
+
 export interface MoneyRaw {
   // My non-void bills (created_by = me, in the clinic-day range), grouped.
   billsByType: MoneyGroupRow[];
@@ -71,6 +86,11 @@ export interface MoneyRaw {
   // Bills I VOIDED today (voided_by = me, voided in range). A void is not revenue -
   // shown separately, EXCLUDED from the collected total (§3/§7).
   voids: { count: number; totalPaise: number };
+  // The doctor's cut of the scoped consultation bills, grouped per doctor. A
+  // legacy consultation bill with no consultation link contributes NO row here
+  // (its money stays wholly with the hospital) - the split still ties out because
+  // the hospital share is reckoned as collections − shares, below.
+  doctorShares: DoctorShareRow[];
   // Admission deposits I took today (admissions.created_by = me), by payment mode.
   advancesByMode: MoneyGroupRow[];
   // Cash I handed BACK today: a discharge whose advance exceeded the final total
@@ -107,6 +127,18 @@ export interface DailyReport {
   discountOnMyBillsPaise: number;
   discountsApproved: { count: number; totalPaise: number };
   voids: { count: number; totalPaise: number };
+  // The consultation split: collections − doctor shares = hospital share. All
+  // three computed HERE (the UI never sums money, §2/§26). INFORMATIONAL - the
+  // doctor's cut is still physically in the drawer (paid out to the doctor
+  // later, not at the counter), so none of this touches moneyInTotalPaise.
+  consultationCollected: { count: number; totalPaise: number };
+  doctorShares: DoctorShareRow[];
+  doctorShareTotalPaise: number;
+  // What the hospital keeps of the consultation collections. Never negative by
+  // construction: the share rule clamps each bill's share to what it collected
+  // (lib/doctors/share.ts), and unlinked legacy bills contribute collections
+  // with no share.
+  hospitalShareTotalPaise: number;
   advancesByMode: ReportLine[];
   advancesTotalPaise: number;
   advancesCount: number;
@@ -169,6 +201,17 @@ export function shapeDailyReport(
 
   const collectedTotalPaise = byMode.reduce((sum, l) => sum + l.totalPaise, 0);
   const collectedCount = byMode.reduce((sum, l) => sum + l.count, 0);
+
+  // The consultation split. Its base is the by-type consultation line - a lookup
+  // of an already-summed figure, so the split's parts always reconcile against
+  // the Collections section on the same sheet.
+  const consultationLine = byType.find((l) => l.key === "consultation");
+  const consultationCollected = {
+    count: consultationLine?.count ?? 0,
+    totalPaise: consultationLine?.totalPaise ?? 0,
+  };
+  const doctorShareTotalPaise = money.doctorShares.reduce((sum, d) => sum + d.sharePaise, 0);
+  const hospitalShareTotalPaise = consultationCollected.totalPaise - doctorShareTotalPaise;
   const advancesTotalPaise = advancesByMode.reduce((sum, l) => sum + l.totalPaise, 0);
   const advancesCount = advancesByMode.reduce((sum, l) => sum + l.count, 0);
 
@@ -190,6 +233,10 @@ export function shapeDailyReport(
     discountOnMyBillsPaise: money.discountOnMyBillsPaise,
     discountsApproved: money.discountsApproved,
     voids: money.voids,
+    consultationCollected,
+    doctorShares: money.doctorShares,
+    doctorShareTotalPaise,
+    hospitalShareTotalPaise,
     advancesByMode,
     advancesTotalPaise,
     advancesCount,
@@ -211,6 +258,7 @@ export function emptyMoneyRaw(): MoneyRaw {
     discountOnMyBillsPaise: 0,
     discountsApproved: { count: 0, totalPaise: 0 },
     voids: { count: 0, totalPaise: 0 },
+    doctorShares: [],
     advancesByMode: [],
     refunds: { count: 0, totalPaise: 0 },
   };

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Search, Loader2, Stethoscope, X } from "lucide-react";
+import { ArrowLeft, Copy, Search, Loader2, Stethoscope, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,8 @@ import { VoidBillDialog, type VoidableBill } from "@/components/void-bill-dialog
 import { formatPaise } from "@/lib/money";
 import { listConsultationsAction } from "@/lib/consultations/actions";
 import type { ConsultationListRow } from "@/lib/consultations/repository";
-import { clinicToday, presetRange } from "@/lib/date-range";
-import { DateRangeFilter, type DatePresetValue } from "@/components/date-range-filter";
+import { clinicToday } from "@/lib/date-range";
+import { DayStepper } from "@/components/day-stepper";
 
 const PAY_LABELS: Record<string, string> = {
   cash: "Cash",
@@ -27,20 +27,23 @@ const PAY_LABELS: Record<string, string> = {
 
 type Filters = {
   q: string;
-  datePreset: DatePresetValue;
-  dateFrom: string;
-  dateTo: string;
+  day: string;
 };
-
-const EMPTY_FILTERS: Filters = { q: "", datePreset: "", dateFrom: "", dateTo: "" };
 
 // The page opens scoped to today's consultations (the common case at the
 // counter), not the full unfiltered history. "Clear filters" returns here,
-// not to EMPTY_FILTERS - "today" stays the baseline view. Mirrors
-// app/(dashboard)/procedures/history/procedures-list.tsx's defaultFilters.
+// not to an empty day - "today" stays the baseline view.
 function defaultFilters(): Filters {
-  const today = presetRange("today", clinicToday());
-  return { ...EMPTY_FILTERS, datePreset: "today", dateFrom: today.dateFrom, dateTo: today.dateTo };
+  return { q: "", day: clinicToday() };
+}
+
+async function copyConsultationId(id: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(id);
+    toast.success("Consultation # copied", { description: `#${id}` });
+  } catch {
+    toast.error("Could not copy.");
+  }
 }
 
 // All consultations, newest first (admin + OP+IN desk). Preloaded on the server;
@@ -50,10 +53,16 @@ function defaultFilters(): Filters {
 export function ConsultationsList({
   initial,
   printable,
+  todayIso,
 }: {
   initial: ConsultationListRow[];
-  // Server-resolved Print gate for this location's consultation design (§1c).
+  // Server-resolved Print (reprint) gate: a design must exist for this
+  // location's consultation receipt AND the viewer must be supervisor/admin
+  // (op_ip_desk lost reprint - they can still view, search, void, re-issue).
   printable: boolean;
+  // Clinic "today" (server-reckoned) - caps the day stepper so it can never
+  // step forward into a day that has no data yet.
+  todayIso: string;
 }) {
   const router = useRouter();
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -72,8 +81,8 @@ export function ConsultationsList({
     const t = setTimeout(async () => {
       const res = await listConsultationsAction({
         q: filters.q.trim() || undefined,
-        dateFrom: filters.dateFrom || undefined,
-        dateTo: filters.dateTo || undefined,
+        dateFrom: filters.day || undefined,
+        dateTo: filters.day || undefined,
       });
       if (seq !== latest.current) return;
       setPending(false);
@@ -124,19 +133,7 @@ export function ConsultationsList({
           ) : null}
         </div>
 
-        <DateRangeFilter
-          preset={filters.datePreset}
-          dateFrom={filters.dateFrom}
-          dateTo={filters.dateTo}
-          onChange={(next) =>
-            setFilters((f) => ({
-              ...f,
-              datePreset: next.preset,
-              dateFrom: next.dateFrom,
-              dateTo: next.dateTo,
-            }))
-          }
-        />
+        <DayStepper day={filters.day} todayIso={todayIso} onChange={(d) => set("day", d)} />
       </div>
 
       {/* Meta row */}
@@ -163,7 +160,7 @@ export function ConsultationsList({
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-4 py-3 font-semibold text-muted-foreground">Date</th>
+                  <th className="px-4 py-3 font-semibold text-muted-foreground">#</th>
                   <th className="px-4 py-3 font-semibold text-muted-foreground">Patient</th>
                   <th className="px-4 py-3 font-semibold text-muted-foreground">Doctor</th>
                   <th className="px-4 py-3 font-semibold text-muted-foreground">Reason</th>
@@ -182,8 +179,22 @@ export function ConsultationsList({
                     key={c.id}
                     className="border-b border-border/60 last:border-b-0 transition-colors hover:bg-muted/30"
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                      {c.created_label}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-sm font-medium text-foreground">
+                          #{c.id}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyConsultationId(c.id)}
+                          title="Copy consultation #"
+                          aria-label={`Copy consultation number ${c.id}`}
+                          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Copy className="size-3" aria-hidden />
+                        </button>
+                      </div>
+                      <div className="text-xs text-muted-foreground">{c.created_label}</div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-foreground">{c.patient_name}</div>

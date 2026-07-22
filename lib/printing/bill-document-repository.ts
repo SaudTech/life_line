@@ -128,6 +128,7 @@ export async function getBillDocument(billId: string): Promise<BillDocumentUnion
       doctorName: consultation.doctor_name,
       reason: consultation.reason,
       validUntilText: consultation.valid_until_text,
+      consultationNumber: core.consultation_id!,
     });
   }
 

@@ -4,8 +4,7 @@ import { z } from "zod";
 // lib/services/schema.ts). CLIENT-SAFE: no "use server", no DB imports.
 
 // `advance` and `end_day` added (plan §4a) so the designer/actions accept them.
-// `end_day` is fully designable; `advance` is accepted by the enum but ships no
-// default/catalog, so it stays button-less (plan §5).
+// Both are fully designable (catalog + checked-in default in lib/printing).
 export const BILL_TYPES = ["consultation", "procedure", "ip", "advance", "end_day"] as const;
 export const billTypeSchema = z.enum(BILL_TYPES);
 

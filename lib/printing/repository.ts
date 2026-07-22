@@ -58,9 +58,10 @@ export async function getActiveTemplate(
 // §1). True iff an admin-designed active row exists OR a checked-in default would
 // seed one on first print. Does NOT seed (a mere render check must not write), and
 // does NOT re-validate the stored row: save-time checkTemplate (actions.ts) already
-// guarantees a stored active row is valid, so existence is sufficient. A type with
-// neither (notably `advance`, which ships no default) returns false, so its button
-// simply never renders - no special-casing anywhere.
+// guarantees a stored active row is valid, so existence is sufficient. A type
+// with neither would return false and its button simply never renders - though
+// every shipped type now carries a checked-in default, so in practice this is
+// only false for a type removed from DEFAULT_TEMPLATES.
 export async function hasPrintableTemplate(
   type: BillType,
   locationId: string,

@@ -7,12 +7,35 @@ import { rupeesToPaise } from "@/lib/money";
 import { zodFieldErrors } from "@/lib/forms/action-result";
 import type { ActionResult } from "@/lib/forms/action-result";
 import { getUserLocationId } from "@/lib/users/repository";
+import { listDepartments } from "@/lib/departments/repository";
 import {
   newDoctorSchema,
   updateDoctorSchema,
   setDoctorActiveSchema,
 } from "./schema";
 import { createDoctor, updateDoctor, setDoctorActive } from "./repository";
+
+// Department is free TEXT on the doctors row (no FK - migration 0016/0020), so
+// the client Combobox choosing one by name isn't itself proof it's real: check
+// it against the location's department list here, authoritatively (never trust
+// the client).
+async function isKnownDepartment(name: string, locationId: string): Promise<boolean> {
+  const departments = await listDepartments(locationId);
+  return departments.some((d) => d.name === name);
+}
+
+// Split the form's single percent-OR-flat share field into the two DB columns
+// (migration 0021) - only the one matching `doctorShareType` is populated, same
+// pattern as resolveDiscountPaise (lib/billing/discount.ts).
+function resolveDoctorShare(v: {
+  doctorShareType: "percentage" | "flat";
+  doctorShareValue: string;
+}): { share_type: string; share_percentage: number; share_flat_paise: number | null } {
+  if (v.doctorShareType === "percentage") {
+    return { share_type: "percentage", share_percentage: Number(v.doctorShareValue), share_flat_paise: null };
+  }
+  return { share_type: "flat", share_percentage: 0, share_flat_paise: rupeesToPaise(v.doctorShareValue) };
+}
 
 // Server Actions for the doctors master list (plan §5). Each mirrors the user
 // actions: it takes a TYPED values object (RHF handleSubmit → action, not
@@ -46,6 +69,10 @@ export async function createDoctorAction(
     };
   }
 
+  if (!(await isKnownDepartment(v.department, locationId))) {
+    return { ok: false, fieldErrors: { department: "Select a department from the list." } };
+  }
+
   const { id } = await createDoctor({
     name: v.name,
     department: v.department,
@@ -53,6 +80,7 @@ export async function createDoctorAction(
     status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
+    ...resolveDoctorShare(v),
     location_id: locationId,
   });
 
@@ -76,6 +104,18 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
   }
   const v = parsed.data;
 
+  const locationId = await getUserLocationId(s.sub);
+  if (!locationId) {
+    return {
+      ok: false,
+      formError: "Could not resolve your location. Please sign in again.",
+    };
+  }
+
+  if (!(await isKnownDepartment(v.department, locationId))) {
+    return { ok: false, fieldErrors: { department: "Select a department from the list." } };
+  }
+
   await updateDoctor({
     id: v.id,
     name: v.name,
@@ -84,6 +124,7 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
     status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
+    ...resolveDoctorShare(v),
   });
 
   await logActivity({
@@ -91,7 +132,7 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
     action: "doctor.update",
     entity: "doctor",
     targetId: v.id,
-    locationId: await getUserLocationId(s.sub),
+    locationId,
   });
   revalidatePath(PANEL_PATH);
   return { ok: true };

@@ -96,7 +96,7 @@ export function AdmissionsManager({
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
                   {tab === "admitted"
-                    ? `Admitted ${a.admitted_label} · ${a.expense_count} expense${a.expense_count === 1 ? "" : "s"}`
+                    ? `#${a.id} · Admitted ${a.admitted_label} · ${a.expense_count} expense${a.expense_count === 1 ? "" : "s"}`
                     : `Discharged ${a.discharged_label ?? "-"}${a.bill_number ? ` · Bill #${a.bill_number}` : ""}`}
                 </div>
               </div>

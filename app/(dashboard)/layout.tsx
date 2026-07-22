@@ -1,6 +1,7 @@
 import { requireSession } from "@/lib/auth/dal";
 import { getUserProfile } from "@/lib/users/repository";
 import { Toaster } from "@/components/ui/sonner";
+import { SuggestionWidget } from "@/components/suggestion-widget";
 import { TopNav } from "./top-nav";
 
 // Shared shell for the signed-in role home pages (admin, supervisor, desk).
@@ -26,6 +27,7 @@ export default async function DashboardLayout({
         supervisorName={profile?.supervisor_name ?? null}
       />
       <main className="flex-1 p-6">{children}</main>
+      <SuggestionWidget />
       <Toaster />
     </div>
   );

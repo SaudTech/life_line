@@ -21,6 +21,9 @@ export const metadata: Metadata = {
 // app/(dashboard)/consultations/history/page.tsx.
 const PROCEDURE_ROLES = ["op_desk", "op_ip_desk", "supervisor", "admin"] as const;
 
+// Reprint is supervisor/admin only (op_desk/op_ip_desk can still view, search,
+// void and re-issue - just not print a duplicate copy). Enforced again,
+// authoritatively, by the pdf route itself - hiding this button is not security.
 export default async function ProceduresHistoryPage() {
   const session = await requireRole(PROCEDURE_ROLES);
   // Mirror the client's default filter (today) so the first paint already
@@ -35,7 +38,9 @@ export default async function ProceduresHistoryPage() {
     locationId ? listUsersByRole([...PROCEDURE_ROLES], locationId) : Promise.resolve([]),
     listActiveServices(),
   ]);
-  const printable = locationId ? await hasPrintableTemplate("procedure", locationId) : false;
+  const canReprint = session.role === "admin" || session.role === "supervisor";
+  const printable =
+    canReprint && locationId ? await hasPrintableTemplate("procedure", locationId) : false;
   return (
     <ProceduresList initial={initial} creators={creators} services={services} printable={printable} />
   );

@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { isValidRupees } from "@/lib/money";
+import { isValidRupees, isRupeesTooLarge, MAX_RUPEES } from "@/lib/money";
+
+// Shown instead of the generic format message when the amount is shaped like a
+// number but exceeds the cap (e.g. "99999999") - "invalid format" is the wrong
+// error for a well-formed number that's simply too big.
+const AMOUNT_TOO_LARGE = `Amount is too large (max ₹${MAX_RUPEES.toLocaleString("en-IN")}).`;
 
 // Single source of truth for doctor-input shapes (plan §5). CLIENT-SAFE: no
 // "use server", no DB imports - imported by both the client form (instant inline
@@ -7,73 +12,12 @@ import { isValidRupees } from "@/lib/money";
 // a rupee STRING here; the action converts it to integer paise via
 // rupeesToPaise before storing (money never travels as a float - §4A).
 
-// Fixed department list (mirrors lib/users/schema's ROLES pattern) - department
-// is now a required dropdown, not free text. The DB column stays plain TEXT
-// (migration 0016), so existing rows never needed a backfill; only new writes
-// are constrained to this set.
-//
-// Deliberately broad: this is an onsite install with no self-serve deploy, so a
-// missing department means a site visit to ship a fix. Erring toward "too many
-// options" costs nothing (the Combobox is searchable); erring toward "too few"
-// costs a truck roll - so the list covers every department a general hospital
-// is likely to run, not just what today's doctors happen to need.
-//
-// Named by the practitioner's TITLE ("Cardiologist"), not the specialty noun
-// ("Cardiology") - this is how Indian hospitals/clinics label doctors in
-// practice (a board, a prescription pad, a Google listing all say "Dr. X,
-// Pulmonologist", never "Dr. X, Pulmonology").
-export const DEPARTMENTS = [
-  "General Physician",
-  "General Surgeon",
-  "Cardiologist",
-  "Cardiothoracic Surgeon (CTVS)",
-  "Orthopedician",
-  "Pediatrician",
-  "Neonatologist",
-  "Gynecologist",
-  "Obstetrician",
-  "ENT Specialist",
-  "Dermatologist (Skin Specialist)",
-  "Cosmetologist",
-  "Neurologist",
-  "Neurosurgeon",
-  "Psychiatrist",
-  "Psychologist",
-  "Ophthalmologist (Eye Specialist)",
-  "Dentist",
-  "Oral & Maxillofacial Surgeon",
-  "Urologist",
-  "Nephrologist",
-  "Radiologist",
-  "Anesthetist",
-  "Gastroenterologist",
-  "Endocrinologist",
-  "Pulmonologist",
-  "Rheumatologist",
-  "Oncologist",
-  "Hematologist",
-  "Plastic Surgeon",
-  "Vascular Surgeon",
-  "Emergency Medicine Specialist",
-  "Intensivist (Critical Care)",
-  "Physiotherapist",
-  "Dietitian / Nutritionist",
-  "Pathologist",
-  "Microbiologist",
-  "Family Physician",
-  "Geriatrician",
-  "Sports Medicine Specialist",
-  "Pain Management Specialist",
-  "Diabetologist",
-  "Andrologist",
-  "Infectious Disease Specialist",
-  "Allergist / Immunologist",
-  "Homeopath",
-  "Ayurvedic Doctor",
-  "Physiatrist (Rehabilitation)",
-  "Other",
-] as const;
-export type Department = (typeof DEPARTMENTS)[number];
+// Department used to be a fixed enum here. It's now a DB-backed master list
+// (migration 0020, lib/departments/*) so the hospital can add or retire one
+// itself - the client combobox sources its options from listActiveDepartments(),
+// not a constant. This schema only checks that SOME non-blank name was chosen;
+// the server action is what checks it's a real, active department for the
+// doctor's location (never trust the client).
 
 // A doctor's current duty state - separate from `active` (plan D: active only
 // gates whether the doctor can be picked for a NEW consultation; a doctor can
@@ -90,7 +34,7 @@ export const DOCTOR_STATUS_LABELS: Record<DoctorStatus, string> = {
 // rather than z.string().uuid() (doctors are not UUIDs, unlike users).
 const id = z.string().regex(/^\d+$/, "Invalid id.");
 const name = z.string().trim().min(1, "Name is required.").max(100);
-const department = z.enum(DEPARTMENTS, { message: "Select a department." });
+const department = z.string().trim().min(1, "Select a department.").max(100);
 // Phone is required, but (unlike lib/users/schema's phone) doctors don't sign
 // in, so no uniqueness/lock-out rules apply here.
 const phone = z
@@ -101,32 +45,79 @@ const status = z.enum(DOCTOR_STATUSES);
 const fee = z
   .string()
   .trim()
-  .refine(isValidRupees, "Enter a valid amount (e.g. 250 or 250.50).");
+  .refine((v) => isValidRupees(v) || isRupeesTooLarge(v), "Enter a valid amount (e.g. 250 or 250.50).")
+  .refine((v) => !isRupeesTooLarge(v), AMOUNT_TOO_LARGE);
 const revisitValidityDays = z.coerce
   .number()
   .int("Whole days only.")
   .min(0, "Cannot be negative.")
   .max(3650, "That's too many days.");
 
-export const newDoctorSchema = z.object({
-  name,
-  department,
-  phone,
-  status,
-  fee,
-  revisitValidityDays,
-});
+// The doctor's share of the consultation fee, quoted either as a whole percent
+// OR a flat rupee amount - never both. One text field (`doctorShareValue`) plus
+// a type toggle (`doctorShareType`), mirroring the existing discount pct/amount
+// pattern (lib/billing/discount.ts) rather than adding two separate inputs.
+// `doctorShareValue`'s meaning - and therefore its validation - depends on
+// `doctorShareType`, so it's checked in `withDoctorShare` below, not here.
+export const DOCTOR_SHARE_TYPES = ["percentage", "flat"] as const;
+export type DoctorShareType = (typeof DOCTOR_SHARE_TYPES)[number];
+const doctorShareType = z.enum(DOCTOR_SHARE_TYPES);
+const doctorShareValue = z.string().trim();
+
+const PERCENTAGE_RE = /^\d{1,3}$/;
+
+// Cross-field check shared by both schemas below (they otherwise diverge only
+// by `id`) - keeps the percent/flat validation in one place.
+function validateDoctorShare(
+  v: { doctorShareType: DoctorShareType; doctorShareValue: string },
+  ctx: z.RefinementCtx,
+) {
+  if (v.doctorShareType === "percentage") {
+    if (!PERCENTAGE_RE.test(v.doctorShareValue) || Number(v.doctorShareValue) > 100) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["doctorShareValue"],
+        message: "Enter a whole percentage from 0 to 100.",
+      });
+    }
+  } else if (isRupeesTooLarge(v.doctorShareValue)) {
+    ctx.addIssue({ code: "custom", path: ["doctorShareValue"], message: AMOUNT_TOO_LARGE });
+  } else if (!isValidRupees(v.doctorShareValue)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["doctorShareValue"],
+      message: "Enter a valid amount (e.g. 250 or 250.50).",
+    });
+  }
+}
+
+const doctorShareShape = { doctorShareType, doctorShareValue };
+
+export const newDoctorSchema = z
+  .object({
+    name,
+    department,
+    phone,
+    status,
+    fee,
+    revisitValidityDays,
+    ...doctorShareShape,
+  })
+  .superRefine(validateDoctorShare);
 export type NewDoctorValues = z.infer<typeof newDoctorSchema>;
 
-export const updateDoctorSchema = z.object({
-  id,
-  name,
-  department,
-  phone,
-  status,
-  fee,
-  revisitValidityDays,
-});
+export const updateDoctorSchema = z
+  .object({
+    id,
+    name,
+    department,
+    phone,
+    status,
+    fee,
+    revisitValidityDays,
+    ...doctorShareShape,
+  })
+  .superRefine(validateDoctorShare);
 export type UpdateDoctorValues = z.infer<typeof updateDoctorSchema>;
 
 export const setDoctorActiveSchema = z.object({

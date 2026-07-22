@@ -101,6 +101,8 @@ export async function getEndDayDocument(
     discountsText: formatRupees(report.discountOnMyBillsPaise),
     discountsApprovedText: `${formatRupees(report.discountsApproved.totalPaise)} (${report.discountsApproved.count})`,
     voidsText: `${formatRupees(report.voids.totalPaise)} (${report.voids.count})`,
+    doctorShareText: formatRupees(report.doctorShareTotalPaise),
+    hospitalShareText: formatRupees(report.hospitalShareTotalPaise),
     advancesText: formatRupees(report.advancesTotalPaise),
     advancesCountText: String(report.advancesCount),
     moneyInText: formatRupees(report.moneyInTotalPaise),
@@ -115,6 +117,11 @@ export async function getEndDayDocument(
       label: l.label,
       count: String(l.count),
       amountText: formatRupees(l.totalPaise),
+    })),
+    doctorShareRows: report.doctorShares.map((d) => ({
+      doctor: d.doctorName,
+      count: String(d.count),
+      amountText: formatRupees(d.sharePaise),
     })),
     advanceModeRows: report.advancesByMode.map((l) => ({
       mode: l.label,

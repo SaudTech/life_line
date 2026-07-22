@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   FileText,
   Loader2,
   Printer,
@@ -15,9 +13,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { DayStepper } from "@/components/day-stepper";
 import { printEndDay } from "@/components/print-end-day";
 import { formatPaise } from "@/lib/money";
-import { addDays } from "@/lib/date-range";
 import { roleTitle } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import type { Tone } from "@/lib/activity/actions";
@@ -26,7 +24,7 @@ import {
   type DailyReportResult,
 } from "@/lib/reports/actions";
 import type { ReportableStaff } from "@/lib/reports/repository";
-import type { BillTypeValue } from "@/lib/reports/summary";
+import type { BillTypeValue, DoctorShareRow } from "@/lib/reports/summary";
 import { PaymentModeDonut } from "./charts";
 
 // The daily report screen (plan §5). Display + a date/subject control only - every
@@ -130,6 +128,8 @@ function Line({
   paise,
   muted,
   strike,
+  indent,
+  strong,
 }: {
   label: string;
   hint?: string;
@@ -138,12 +138,24 @@ function Line({
   paise: number;
   muted?: boolean;
   strike?: boolean;
+  // A sub-row of the line above it (the consultation split's doctor/hospital
+  // rows) - indented so the eye reads it as a breakdown, not a new item.
+  indent?: boolean;
+  // Bold label + amount for a line that is a conclusion (the hospital share)
+  // without being a section Subtotal.
+  strong?: boolean;
 }) {
   const dim = muted ?? paise === 0;
   return (
     <tr className="border-b border-border/70">
-      <td className="py-2 pr-3 align-top">
-        <span className={cn("text-sm font-medium", dim ? "text-muted-foreground" : "text-foreground")}>
+      <td className={cn("py-2 pr-3 align-top", indent && "pl-5")}>
+        <span
+          className={cn(
+            "text-sm",
+            strong ? "font-bold" : "font-medium",
+            dim ? "text-muted-foreground" : "text-foreground",
+          )}
+        >
           {label}
         </span>
         {hint ? (
@@ -155,7 +167,8 @@ function Line({
       </td>
       <td
         className={cn(
-          "py-2 pl-3 text-right align-top text-sm font-semibold tabular-nums",
+          "py-2 pl-3 text-right align-top text-sm tabular-nums",
+          strong ? "font-bold" : "font-semibold",
           dim ? "text-muted-foreground" : "text-foreground",
           strike && "text-muted-foreground line-through decoration-1",
         )}
@@ -164,6 +177,16 @@ function Line({
       </td>
     </tr>
   );
+}
+
+// The doctor's rate, compact, for "(40%)" / "(₹500.00)" beside the name: a
+// payout figure with no visible rate invites an argument at settlement time.
+// The rate shown is the doctor's CURRENT configuration (the share rule prices
+// at report time - lib/doctors/share.ts), exactly what the figure was computed
+// with. Kept to a parenthesis so a many-doctor day still reads as one compact
+// row per doctor.
+function shareRate(d: DoctorShareRow): string {
+  return d.shareType === "flat" ? `₹${formatPaise(d.shareFlatPaise)}` : `${d.sharePercentage}%`;
 }
 
 // A section subtotal: a single rule above, bolder type. Ledger convention.
@@ -222,7 +245,6 @@ export function DailyReportView({
   }, [dayIso, subject]);
 
   const { meta, report } = data;
-  const atToday = dayIso >= todayIso;
   const everyone = meta.scope === "everyone";
   const isSelf = meta.subjectIsSelf;
 
@@ -260,7 +282,7 @@ export function DailyReportView({
     report.voids.count > 0;
 
   return (
-    <div className="w-full pb-10">
+    <div className="w-full pb-10 print:pb-0">
       {/* ── Toolbar. Not part of the sheet and not part of the print: this is the
           desk furniture you use to CHOOSE which document to look at. It sits above
           the paper, deliberately in the app's normal UI language. */}
@@ -300,42 +322,7 @@ export function DailyReportView({
             />
           ) : null}
 
-          <div className="flex h-9 items-center gap-1 rounded-lg border bg-card px-1">
-            <button
-              type="button"
-              aria-label="Previous day"
-              onClick={() => setDayIso((d) => addDays(d, -1))}
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-            </button>
-            <input
-              type="date"
-              value={dayIso}
-              max={todayIso}
-              onChange={(e) => e.target.value && setDayIso(e.target.value)}
-              aria-label="Report date"
-              className="h-7 rounded bg-transparent px-1 text-sm text-foreground outline-none"
-            />
-            <button
-              type="button"
-              aria-label="Next day"
-              disabled={atToday}
-              onClick={() => setDayIso((d) => addDays(d, 1))}
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-            >
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setDayIso(todayIso)}
-            disabled={dayIso === todayIso}
-          >
-            Today
-          </Button>
+          <DayStepper day={dayIso} todayIso={todayIso} onChange={setDayIso} />
           {/* TWO ways onto paper, deliberately. They are not duplicates:
               - Print: window.print(). The sheet below IS the printed page (the
                 @media print rules in globals.css hide this toolbar and the app bar),
@@ -436,23 +423,53 @@ export function DailyReportView({
               >
                 <Ledger>
                   {byType.map((l) => (
-                    <Line
-                      key={l.key}
-                      label={l.label}
-                      // An in-patient bill collects only the BALANCE left after its
-                      // advance, so this figure is routinely far below what was billed -
-                      // and ₹0 for a stay the advance covered in full. Say so on the row
-                      // itself; a bare "In-patient · 1 bill · ₹0.00" invites the reader
-                      // to conclude the sheet lost their money.
-                      hint={
-                        l.key === "ip"
-                          ? "Balance settled at discharge only - the advance is under Admission deposits."
-                          : undefined
-                      }
-                      count={l.count}
-                      countLabel={`${l.count} ${l.count === 1 ? "bill" : "bills"}`}
-                      paise={l.totalPaise}
-                    />
+                    <Fragment key={l.key}>
+                      <Line
+                        label={l.label}
+                        // An in-patient bill collects only the BALANCE left after its
+                        // advance, so this figure is routinely far below what was billed -
+                        // and ₹0 for a stay the advance covered in full. Say so on the row
+                        // itself; a bare "In-patient · 1 bill · ₹0.00" invites the reader
+                        // to conclude the sheet lost their money.
+                        hint={
+                          l.key === "ip"
+                            ? "Balance settled at discharge only - the advance is under Admission deposits."
+                            : undefined
+                        }
+                        count={l.count}
+                        countLabel={`${l.count} ${l.count === 1 ? "bill" : "bills"}`}
+                        paise={l.totalPaise}
+                      />
+                      {/* The consultation split, indented under its parent row: each
+                          doctor's cut deducted per their configured rate (percentage or
+                          flat - the row says which), then the hospital's share as the
+                          remainder. All shaper-computed. INFORMATIONAL: these rows
+                          decompose the Consultation figure above - they are NOT extra
+                          items, so Total collected does not sum them, and the doctors'
+                          cut (still in the drawer, settled with the doctor later)
+                          never touches Money in below. */}
+                      {l.key === "consultation" && report.doctorShares.length > 0
+                        ? [
+                            ...report.doctorShares.map((d) => (
+                              <Line
+                                key={`share-${d.doctorId}`}
+                                indent
+                                label={`${d.doctorName} (${shareRate(d)})`}
+                                countLabel={`${d.count} ${d.count === 1 ? "consultation" : "consultations"}`}
+                                paise={-d.sharePaise}
+                              />
+                            )),
+                            <Line
+                              key="hospital-share"
+                              indent
+                              strong
+                              label="Hospital share"
+                              paise={report.hospitalShareTotalPaise}
+                              muted={false}
+                            />,
+                          ]
+                        : null}
+                    </Fragment>
                   ))}
                   <Subtotal
                     label="Total collected"

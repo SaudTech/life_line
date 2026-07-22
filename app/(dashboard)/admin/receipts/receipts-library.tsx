@@ -39,11 +39,13 @@ import { PreviewDialog } from "./preview-dialog";
 
 // Every designable type ships a default. End-Day is a first-class designable
 // report template printed through the same pipeline (print-updates plan §4);
-// `advance` is intentionally absent - it ships no default/catalog (plan §5).
+// Advance deposit is the admission advance receipt (proof of the advance handed
+// over at admission - it prints once an active design exists).
 const SECTIONS: { type: BillType; label: string }[] = [
   { type: "consultation", label: "Consultation" },
   { type: "procedure", label: "Procedure" },
   { type: "ip", label: "IP" },
+  { type: "advance", label: "Advance deposit" },
   { type: "end_day", label: "End-of-day report" },
 ];
 

@@ -3,6 +3,7 @@ import {
   shapeDailyReport,
   emptyMoneyRaw,
   BILL_TYPES,
+  type DoctorShareRow,
   type MoneyRaw,
 } from "./summary";
 import { PAYMENT_MODES } from "@/lib/consultations/schema";
@@ -132,6 +133,71 @@ describe("shapeDailyReport", () => {
     const voided = r.activity.find((a) => a.action === "bill.void")!;
     expect(voided.label).toBe("Bill voided");
     expect(voided.tone).toBe("danger");
+  });
+});
+
+// The consultation split: collections − per-doctor shares = hospital share. The
+// shares arrive pre-summed per doctor (the repository applies the one tested rule,
+// lib/doctors/share.ts); the shaper's job is the remainder - and keeping the split
+// OUT of money-in, because the doctors' cut is still physically in the drawer.
+describe("shapeDailyReport consultation split", () => {
+  const doctorShare = (over: Partial<DoctorShareRow>): DoctorShareRow => ({
+    doctorId: "1",
+    doctorName: "Dr. Anita Rao",
+    shareType: "percentage",
+    sharePercentage: 40,
+    shareFlatPaise: 0,
+    count: 1,
+    sharePaise: 0,
+    ...over,
+  });
+
+  it("deducts each doctor's share and leaves the hospital the remainder", () => {
+    // The stated case: ₹10,000 of consultations, doctors on 40% → hospital keeps ₹6,000.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "consultation", count: 4, totalPaise: 1000000 }],
+      billsByMode: [{ key: "cash", count: 4, totalPaise: 1000000 }],
+      doctorShares: [
+        doctorShare({ doctorId: "1", count: 3, sharePaise: 300000 }),
+        doctorShare({ doctorId: "2", doctorName: "Dr. Suresh Kumar", count: 1, sharePaise: 100000 }),
+      ],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.consultationCollected).toEqual({ count: 4, totalPaise: 1000000 });
+    expect(r.doctorShareTotalPaise).toBe(400000);
+    expect(r.hospitalShareTotalPaise).toBe(600000);
+    // Informational only - money in is untouched by the split.
+    expect(r.moneyInTotalPaise).toBe(1000000);
+  });
+
+  it("with no shares configured, the hospital share IS the consultation total", () => {
+    // Also covers legacy bills with no consultation link: they contribute
+    // collections but no share row, and stay wholly with the hospital.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "consultation", count: 2, totalPaise: 50000 }],
+      billsByMode: [{ key: "cash", count: 2, totalPaise: 50000 }],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.doctorShares).toEqual([]);
+    expect(r.doctorShareTotalPaise).toBe(0);
+    expect(r.hospitalShareTotalPaise).toBe(50000);
+  });
+
+  it("a day with no consultations has an all-zero split", () => {
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "procedure", count: 1, totalPaise: 40000 }],
+      billsByMode: [{ key: "upi", count: 1, totalPaise: 40000 }],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.consultationCollected).toEqual({ count: 0, totalPaise: 0 });
+    expect(r.doctorShareTotalPaise).toBe(0);
+    expect(r.hospitalShareTotalPaise).toBe(0);
   });
 });
 

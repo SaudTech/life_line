@@ -132,21 +132,25 @@
  */
 @media print {
   @page {
-    /* The top band is RESERVED, not padding: these sheets go through a printer
-       loaded with pre-printed hospital letterhead, and content in this band would
-       land on top of it. 40mm mirrors LETTERHEAD_TOP_MM, the same reserve the pdfme
-       templates ship with (lib/printing/defaults/build.ts) - keep the two in step.
-       Unlike the pdfme path this is NOT admin-tunable per design; it is a constant. */
-    margin: 40mm 14mm 14mm;
+    /* Plain working margins. Unlike the pdfme receipts (which reserve a 40mm top
+       band for pre-printed letterhead stock - LETTERHEAD_TOP_MM in
+       lib/printing/defaults/build.ts), the browser-print sheet PRINTS ITS OWN
+       masthead (hospital name / END OF DAY REPORT), so a letterhead reserve here
+       only wasted a third of the first page: this sheet goes on plain paper. If a
+       counter ever does feed it letterhead stock, restore the 40mm top margin. */
+    margin: 12mm 14mm;
   }
   body {
     background: #fff;
   }
   /* The one sticky app bar is the shell <header>; the report's own header is a
      nested block that must still print, so scope this to a direct child of body's
-     layout shell via the sticky bar's role. */
+     layout shell via the sticky bar's role. [data-sonner-toaster] is the toast
+     layer - fixed overlays print on every page, and a leftover "Saved" toast on a
+     money sheet reads like part of the record. */
   header.sticky,
-  [data-no-print] {
+  [data-no-print],
+  [data-sonner-toaster] {
     display: none !important;
   }
   main {

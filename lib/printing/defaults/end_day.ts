@@ -13,7 +13,10 @@ import { LETTERHEAD_TOP_MM, hLine, labeledField, makeBasePdf, staticText, tableF
 // Same document, same order, same wording, so an admin can hand either one to the
 // same person and it reads the same: masthead (hospital / END OF DAY REPORT / date /
 // subject / generated) → COLLECTIONS → BY PAYMENT MODE → ADMISSION DEPOSITS →
-// MEMORANDA → double-ruled MONEY IN → ACTIVITY. If you change one, change the other.
+// MEMORANDA (incl. the consultation split's doctor/hospital share totals) →
+// double-ruled MONEY IN → ACTIVITY. If you change one, change the other.
+// (The screen's per-doctor share rows are the one section this fixed flow cannot
+// fit - it prints the split's two totals; a custom design can add doctorShareTable.)
 //
 // Three things it CANNOT mirror, by pdfme's nature - do not file these as bugs:
 //   1. No donut. pdfme has no chart primitive; the by-mode table carries the same
@@ -193,6 +196,14 @@ export const END_DAY_DEFAULT_TEMPLATE = {
       labeledField("discountsText", { x: 10, y: 203, w: 92, h: 4.5 }, { fontSize: 8.5, fontColor: INK }),
       labeledField("discountsApprovedText", { x: 108, y: 203, w: 92, h: 4.5 }, { fontSize: 8.5, fontColor: INK }),
       labeledField("voidsText", { x: 10, y: 209, w: 92, h: 4.5 }, { fontSize: 8.5, fontColor: INK }),
+      // The consultation split's two totals (the on-screen sheet's "Consultation
+      // split" section). Memoranda is the right home: the doctors' cut is still
+      // inside the collected total and inside the drawer - it must not be
+      // subtracted from Money in. The screen's per-doctor rows have no room in
+      // this fixed flow; the `doctorShareTable` catalog field exists for a custom
+      // design that wants them.
+      labeledField("doctorShareText", { x: 108, y: 209, w: 92, h: 4.5 }, { fontSize: 8.5, fontColor: INK }),
+      labeledField("hospitalShareText", { x: 10, y: 215, w: 88, h: 4.5 }, { fontSize: 8.5, fontColor: INK }),
 
       // ── Money in ─────────────────────────────────────────────────────────
       // The one number that has to match the drawer at close, shown as its WORKING:

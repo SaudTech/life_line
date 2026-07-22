@@ -1,9 +1,11 @@
 import { pool } from "@/lib/db";
 import type { IsoDay } from "@/lib/consultations/rules";
+import { doctorShareSql } from "@/lib/doctors/share";
 import { billCollectedSql, clinicRange, toPaise } from "@/lib/money-in";
 import {
   emptyMoneyRaw,
   type ActivityCountRow,
+  type DoctorShareRow,
   type MoneyGroupRow,
   type MoneyRaw,
 } from "./summary";
@@ -132,6 +134,36 @@ export async function getMoneySummary(
     args,
   );
 
+  // The doctor's cut of the scoped consultation bills, grouped per doctor. The
+  // per-bill share comes from the ONE tested rule (lib/doctors/share.ts), priced
+  // on what each bill COLLECTED and at the doctor's CURRENT rate (nothing is
+  // snapshotted). A legacy bill with consultation_id NULL drops out of the join -
+  // its money simply stays with the hospital in the shaper's remainder. The rate
+  // columns ride along so the sheet can say how each figure was arrived at.
+  const doctorShares = pool.query<{
+    doctor_id: string;
+    doctor_name: string;
+    share_type: string;
+    share_percentage: number;
+    share_flat_paise: string | null;
+    count: number;
+    share_paise: string;
+  }>(
+    `SELECT d.id::text AS doctor_id, d.name AS doctor_name,
+            d.share_type, d.share_percentage, d.share_flat_paise,
+            count(*)::int AS count,
+            COALESCE(sum(${doctorShareSql(billCollectedSql("b"), "d")}), 0)::bigint AS share_paise
+       FROM bills b
+       JOIN consultations c ON c.id = b.consultation_id
+       JOIN doctors d ON d.id = c.doctor_id
+      WHERE ($1::uuid IS NULL OR b.created_by = $1) AND b.location_id = $4
+        AND b.status = 'final' AND b.type = 'consultation'
+        AND ${clinicRange("b.created_at", 2, 3)}
+      GROUP BY d.id, d.name, d.share_type, d.share_percentage, d.share_flat_paise
+      ORDER BY d.name ASC, d.id ASC`,
+    args,
+  );
+
   // Admission deposits taken today, split by how the advance was tendered. Only real
   // deposits (advance > 0) - a ₹0 admission held no money to reconcile.
   const advancesByMode = pool.query<{ key: string; count: number; total_paise: string }>(
@@ -159,12 +191,13 @@ export async function getMoneySummary(
     args,
   );
 
-  const [bt, bm, dm, da, vo, av, rf] = await Promise.all([
+  const [bt, bm, dm, da, vo, ds, av, rf] = await Promise.all([
     billsByType,
     billsByMode,
     discountMine,
     discountsApproved,
     voids,
+    doctorShares,
     advancesByMode,
     refunds,
   ]);
@@ -188,6 +221,17 @@ export async function getMoneySummary(
       count: vo.rows[0]?.count ?? 0,
       totalPaise: toPaise(vo.rows[0]?.total_paise ?? null),
     },
+    doctorShares: ds.rows.map(
+      (r): DoctorShareRow => ({
+        doctorId: r.doctor_id,
+        doctorName: r.doctor_name,
+        shareType: r.share_type,
+        sharePercentage: r.share_percentage,
+        shareFlatPaise: toPaise(r.share_flat_paise),
+        count: r.count,
+        sharePaise: toPaise(r.share_paise),
+      }),
+    ),
     advancesByMode: av.rows.map(toGroup),
     refunds: {
       count: rf.rows[0]?.count ?? 0,

@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import type { Template } from "@pdfme/common";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { billDocumentToInputs, sampleBillDocument, type BillType } from "@/lib/printing/fields";
+import {
+  advanceReceiptToInputs,
+  sampleAdvanceReceiptDocument,
+} from "@/lib/printing/advance-receipt";
 
 // Renders the CURRENT (possibly unsaved) canvas state against fixed sample
 // data (plan §5 "Live preview") - so an admin sees a realistic receipt before
@@ -47,8 +51,12 @@ export function PreviewDialog({
           import("@/lib/printing/pdf-plugins"),
           import("@/lib/printing/fonts-client"),
         ]);
-        const doc = sampleBillDocument(type);
-        const inputs = billDocumentToInputs(doc);
+        // Advance isn't a BillDocument (no bill exists until discharge) - its
+        // sample + input mapping live beside its own document shape.
+        const inputs =
+          type === "advance"
+            ? advanceReceiptToInputs(sampleAdvanceReceiptDocument())
+            : billDocumentToInputs(sampleBillDocument(type));
         const pdf = await generate({
           template,
           inputs: [inputs],

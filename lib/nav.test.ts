@@ -22,6 +22,7 @@ describe("navItemsForRole", () => {
       "IPD",
       "Reports",
       "Receipt Templates",
+      "Suggestions",
     ]);
     expect(items.find((i) => i.label === "Staff")).toEqual({
       href: "/admin/users",

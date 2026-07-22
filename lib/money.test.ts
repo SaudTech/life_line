@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidRupees, rupeesToPaise, formatPaise } from "./money";
+import { isValidRupees, isRupeesTooLarge, rupeesToPaise, formatPaise } from "./money";
 
 describe("rupeesToPaise", () => {
   it("converts whole and fractional rupees to integer paise", () => {
@@ -57,5 +57,23 @@ describe("isValidRupees", () => {
     expect(isValidRupees("-5")).toBe(false);
     expect(isValidRupees("1.")).toBe(false);
     expect(isValidRupees("12345678")).toBe(false); // 8 whole digits
+  });
+});
+
+describe("isRupeesTooLarge", () => {
+  it("flags a well-formed amount over the 7-digit cap", () => {
+    expect(isRupeesTooLarge("99999999")).toBe(true);
+    expect(isRupeesTooLarge("12345678.90")).toBe(true);
+  });
+
+  it("does not flag amounts at or under the cap", () => {
+    expect(isRupeesTooLarge("9999999")).toBe(false);
+    expect(isRupeesTooLarge("250")).toBe(false);
+  });
+
+  it("does not flag input that isn't shaped like a number at all", () => {
+    expect(isRupeesTooLarge("abc")).toBe(false);
+    expect(isRupeesTooLarge("")).toBe(false);
+    expect(isRupeesTooLarge("1.234")).toBe(false); // bad shape, not "too large"
   });
 });

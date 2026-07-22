@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth/dal";
-import { recentPatients } from "@/lib/patients/repository";
+import { countPatients, recentPatients } from "@/lib/patients/repository";
 import { PatientsManager } from "./patients-manager";
 
 export const metadata: Metadata = {
@@ -16,6 +16,6 @@ export const metadata: Metadata = {
 // demand once the operator types.
 export default async function PatientsPage() {
   await requireAdmin();
-  const recent = await recentPatients(10);
-  return <PatientsManager recent={recent} />;
+  const [recent, total] = await Promise.all([recentPatients(10), countPatients()]);
+  return <PatientsManager recent={recent} total={total} />;
 }

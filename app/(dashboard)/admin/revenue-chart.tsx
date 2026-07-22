@@ -11,6 +11,11 @@ interface RevenueChartProps {
   }>;
   title: string;
   total: number;
+  // Optional split of `total`: the doctors' cut of consultation money and what the
+  // hospital keeps after it (both server-computed - this component does no math).
+  // Rendered as a compact line under the headline when both are provided.
+  doctorSharePaise?: number;
+  hospitalNetPaise?: number;
 }
 
 function formatYAxis(value: number): string {
@@ -27,7 +32,13 @@ function formatYAxis(value: number): string {
   return `₹${(value / 100).toLocaleString("en-IN")}`;
 }
 
-export function RevenueChart({ data, title, total }: RevenueChartProps) {
+export function RevenueChart({
+  data,
+  title,
+  total,
+  doctorSharePaise,
+  hospitalNetPaise,
+}: RevenueChartProps) {
   // Recharts paints into SVG and can't read a CSS custom property, so the token is
   // resolved from the document once on mount. The initial value MUST stay in step with
   // --primary in globals.css (brand indigo): it is what SSR and the first client paint
@@ -74,6 +85,19 @@ export function RevenueChart({ data, title, total }: RevenueChartProps) {
             <span className="text-lg font-semibold text-muted-foreground sm:text-xl">₹</span>
             {formatPaise(total)}
           </div>
+          {/* The split of the headline: doctors' cut deducted, hospital net bold -
+              the same reading as the daily report's consultation split. */}
+          {doctorSharePaise != null && hospitalNetPaise != null ? (
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-[11px] font-medium sm:text-xs">
+              <span className="text-muted-foreground">
+                Doctors&apos; share{" "}
+                <span className="tabular-nums">-₹{formatPaise(doctorSharePaise)}</span>
+              </span>
+              <span className="font-bold text-foreground">
+                Hospital <span className="tabular-nums">₹{formatPaise(hospitalNetPaise)}</span>
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 

@@ -322,120 +322,133 @@ export function ConsultationFlow({
           />
           {searching ? <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden /> : null}
         </div>
-
-        {/* New-patient registration (auto when no match) */}
-        {validPhone && registerNew ? (
-          <div className="mt-4 rounded-xl border border-dashed bg-muted/20 p-4">
-            <p className="mb-3 text-sm font-medium text-foreground">
-              {matches && matches.length === 0
-                ? `No patient found for +91 ${prettyPhone(phone)} - register a new one`
-                : "New patient details"}
-            </p>
-            <div className="grid gap-3">
-              <LabeledInput
-                label="Full name"
-                value={np.name}
-                onChange={(val) => setNp((s) => ({ ...s, name: val }))}
-                error={npErrors.name}
-                autoFocus
-                placeholder="e.g. Meera Ann"
-              />
-              <div className="grid grid-cols-3 gap-3">
-                <LabeledInput
-                  label="Age"
-                  type="number"
-                  min="0"
-                  max="130"
-                  value={np.age}
-                  onChange={(val) => setNp((s) => ({ ...s, age: val.replace(/\D/g, "").slice(0, 3) }))}
-                  error={npErrors.age}
-                  inputMode="numeric"
-                  placeholder="34"
-                />
-                <div className="flex flex-col gap-1.5 text-xs font-semibold text-muted-foreground">
-                  Gender
-                  <Combobox
-                    options={GENDER_OPTIONS}
-                    value={np.gender || ""}
-                    onChange={(val) => setNp((s) => ({ ...s, gender: val }))}
-                    ariaLabel="Gender"
-                    placeholder="Select…"
-                    searchPlaceholder="Search…"
-                  />
-                </div>
-                <LabeledInput
-                  label="Area"
-                  value={np.area}
-                  onChange={(val) => setNp((s) => ({ ...s, area: val }))}
-                  error={npErrors.area}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
       </StepCard>
 
-      {/* STEP 2 - Select patient */}
-      {validPhone && matches && matches.length > 0 ? (
-        <StepCard n={2} title="Select patient" done={!!selected}>
-          <p className="mb-3 text-xs text-muted-foreground">
-            {matches.length} {matches.length === 1 ? "patient" : "patients"} on +91 {prettyPhone(phone)}.
-          </p>
-          <div className="grid gap-2">
-            {matches.map((p) => {
-              const sel = selected?.id === p.id;
-              return (
+      {/* STEP 2 - Select an existing patient, or register a new one. Exactly
+          one of the two shows at a time - registerNew switches which. */}
+      {validPhone && matches !== null ? (
+        <StepCard
+          n={2}
+          title={registerNew ? "New patient details" : "Select patient"}
+          done={patientReady}
+        >
+          {registerNew ? (
+            <>
+              {matches.length === 0 ? (
+                <p className="mb-3 text-sm text-muted-foreground">
+                  No patient found for +91 {prettyPhone(phone)} - register a new one.
+                </p>
+              ) : null}
+              <div className="grid gap-3">
+                <LabeledInput
+                  label="Full name"
+                  value={np.name}
+                  onChange={(val) => setNp((s) => ({ ...s, name: val }))}
+                  error={npErrors.name}
+                  autoFocus
+                  placeholder="e.g. Meera Ann"
+                />
+                <div className="grid grid-cols-3 gap-3">
+                  <LabeledInput
+                    label="Age"
+                    type="number"
+                    min="0"
+                    max="130"
+                    value={np.age}
+                    onChange={(val) => setNp((s) => ({ ...s, age: val.replace(/\D/g, "").slice(0, 3) }))}
+                    error={npErrors.age}
+                    inputMode="numeric"
+                    placeholder="34"
+                  />
+                  <div className="flex flex-col gap-1.5 text-xs font-semibold text-muted-foreground">
+                    Gender
+                    <Combobox
+                      options={GENDER_OPTIONS}
+                      value={np.gender || ""}
+                      onChange={(val) => setNp((s) => ({ ...s, gender: val }))}
+                      ariaLabel="Gender"
+                      placeholder="Select…"
+                      searchPlaceholder="Search…"
+                    />
+                  </div>
+                  <LabeledInput
+                    label="Area"
+                    value={np.area}
+                    onChange={(val) => setNp((s) => ({ ...s, area: val }))}
+                    error={npErrors.area}
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+              {matches.length > 0 ? (
                 <button
-                  key={p.id}
                   type="button"
-                  onClick={() => {
-                    setSelected(p);
-                    setRegisterNew(false);
-                    setNpErrors({});
-                  }}
-                  aria-pressed={sel}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    sel ? "border-primary bg-accent" : "hover:border-foreground/20 hover:bg-muted/40",
-                  )}
+                  onClick={() => setRegisterNew(false)}
+                  className="mt-3 rounded text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <Avatar text={initials(p.name)} active={sel} round />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-foreground">{p.name}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {p.age != null ? `${p.age} yrs` : "Age -"}
-                      {p.gender ? ` · ${cap(p.gender)}` : ""}
-                      {" · Last visit "}
-                      {p.last_visit ? formatDay(p.last_visit) : "Never"}
-                    </span>
-                  </span>
-                  <span
-                    className={cn(
-                      "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
-                      sel ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
-                    )}
-                    aria-hidden
-                  >
-                    {sel ? <Check className="size-3" /> : null}
-                  </span>
+                  ← Back to existing patients on this number
                 </button>
-              );
-            })}
-          </div>
-          {!registerNew ? (
-            <button
-              type="button"
-              onClick={() => {
-                setRegisterNew(true);
-                setSelected(null);
-              }}
-              className="mt-2 rounded text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              Someone new on this number? Register a new patient
-            </button>
-          ) : null}
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {matches.length} {matches.length === 1 ? "patient" : "patients"} on +91 {prettyPhone(phone)}.
+              </p>
+              <div className="grid gap-2">
+                {matches.map((p) => {
+                  const sel = selected?.id === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelected(p);
+                        setRegisterNew(false);
+                        setNpErrors({});
+                      }}
+                      aria-pressed={sel}
+                      className={cn(
+                        "flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        sel ? "border-primary bg-accent" : "hover:border-foreground/20 hover:bg-muted/40",
+                      )}
+                    >
+                      <Avatar text={initials(p.name)} active={sel} round />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-foreground">{p.name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {p.age != null ? `${p.age} yrs` : "Age -"}
+                          {p.gender ? ` · ${cap(p.gender)}` : ""}
+                          {" · Last visit "}
+                          {p.last_visit ? formatDay(p.last_visit) : "Never"}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
+                          sel ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
+                        )}
+                        aria-hidden
+                      >
+                        {sel ? <Check className="size-3" /> : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegisterNew(true);
+                  setSelected(null);
+                }}
+                className="mt-2 rounded text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Someone new on this number? Register a new patient
+              </button>
+            </>
+          )}
         </StepCard>
       ) : null}
 
@@ -848,10 +861,12 @@ function SuccessScreen({
           </h1>
           <p className="mt-1 text-sm text-accent-foreground">
             {revisit ? (
-              "No charge - recorded under the existing consultation."
+              <>
+                No charge - recorded under consultation <b>#{outcome.consultationId}</b>.
+              </>
             ) : (
               <>
-                Token <b>{outcome.billNumber}</b> · share the receipt with the patient.
+                Consultation <b>#{outcome.consultationId}</b> · share the receipt with the patient.
               </>
             )}
           </p>

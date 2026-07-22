@@ -20,6 +20,8 @@ describe("newDoctorSchema", () => {
     status: "available",
     fee: "250.50",
     revisitValidityDays: 7,
+    doctorShareType: "percentage",
+    doctorShareValue: "40",
   };
 
   it("accepts a well-formed doctor", () => {
@@ -27,12 +29,12 @@ describe("newDoctorSchema", () => {
     expect(r.success).toBe(true);
   });
 
-  it("rejects an empty department (now a required dropdown)", () => {
+  it("rejects an empty department (required, though the list itself now lives in the DB)", () => {
     expect(firstErrorPath({ ...valid, department: "" })).toBe("department");
   });
 
-  it("rejects a department outside the fixed list", () => {
-    expect(firstErrorPath({ ...valid, department: "Made Up Dept" })).toBe("department");
+  it("rejects a whitespace-only department", () => {
+    expect(firstErrorPath({ ...valid, department: "   " })).toBe("department");
   });
 
   it("rejects an empty phone (now required)", () => {
@@ -63,6 +65,12 @@ describe("newDoctorSchema", () => {
     expect(firstErrorPath({ ...valid, fee: "" })).toBe("fee");
   });
 
+  it("gives a 'too large' message (not a format error) for a fee over the cap", () => {
+    const r = newDoctorSchema.safeParse({ ...valid, fee: "99999999" });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0].message).toMatch(/too large/i);
+  });
+
   it("rejects negative or non-integer validity", () => {
     expect(firstErrorPath({ ...valid, revisitValidityDays: -1 })).toBe(
       "revisitValidityDays",
@@ -70,6 +78,47 @@ describe("newDoctorSchema", () => {
     expect(firstErrorPath({ ...valid, revisitValidityDays: 1.5 })).toBe(
       "revisitValidityDays",
     );
+  });
+
+  it("accepts a flat-amount share", () => {
+    const r = newDoctorSchema.safeParse({
+      ...valid,
+      doctorShareType: "flat",
+      doctorShareValue: "500.50",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a percentage share over 100", () => {
+    expect(
+      firstErrorPath({ ...valid, doctorShareType: "percentage", doctorShareValue: "101" }),
+    ).toBe("doctorShareValue");
+  });
+
+  it("rejects a non-whole percentage share", () => {
+    expect(
+      firstErrorPath({ ...valid, doctorShareType: "percentage", doctorShareValue: "40.5" }),
+    ).toBe("doctorShareValue");
+  });
+
+  it("rejects a malformed flat-amount share", () => {
+    expect(
+      firstErrorPath({ ...valid, doctorShareType: "flat", doctorShareValue: "abc" }),
+    ).toBe("doctorShareValue");
+  });
+
+  it("gives a 'too large' message for a flat-amount share over the cap", () => {
+    const r = newDoctorSchema.safeParse({
+      ...valid,
+      doctorShareType: "flat",
+      doctorShareValue: "99999999",
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0].message).toMatch(/too large/i);
+  });
+
+  it("rejects an unknown share type", () => {
+    expect(firstErrorPath({ ...valid, doctorShareType: "lump_sum" })).toBe("doctorShareType");
   });
 });
 
@@ -82,6 +131,8 @@ describe("updateDoctorSchema", () => {
       status: "available",
       fee: "300",
       revisitValidityDays: 0,
+      doctorShareType: "percentage",
+      doctorShareValue: "40",
     };
     expect(updateDoctorSchema.safeParse({ ...base, id: "12" }).success).toBe(true);
     expect(updateDoctorSchema.safeParse({ ...base, id: "abc" }).success).toBe(false);

@@ -10,11 +10,10 @@ import type { AnyBillDocument, BillDocument, EndDayDocument } from "./bill-docum
 //      that's what the pdfme template's field `name`s bind to.
 // PURE and client-safe - no DB, no React.
 
-// `advance` and `end_day` join the three bill types (plan §4a). `end_day` is a
-// fully designable report template (catalog + default below); `advance` exists
-// only so the print-button gate (hasPrintableTemplate) can treat it uniformly -
-// it ships NO default and NO catalog entry, so it stays button-less until an
-// owner asks for it (plan §5).
+// `advance` and `end_day` join the three bill types (plan §4a). Both are now
+// fully designable (catalog + checked-in default): `end_day` as a report,
+// `advance` as the admission advance-deposit receipt (the owner asked for it,
+// graduating it out of plan §5's "no default" state).
 export type BillType = "consultation" | "procedure" | "ip" | "advance" | "end_day";
 
 // How a field is rendered on the page:
@@ -96,6 +95,10 @@ const CONSULTATION_FIELDS: FieldMeta[] = [
   labeled("doctorName", "Doctor", "Dr. Anita Rao"),
   labeled("reason", "Reason for visit", "Fever", "Reason"),
   labeled("validUntilText", "Valid until (free revisit window)", "16 Jul 2026", "Valid until"),
+  // The consultation's own id (consultations.id) - an internal lookup key
+  // reused as the "consultation number" (e.g. for a later procedure bill),
+  // not a separate generated sequence like billNumber.
+  labeled("consultationNumber", "Consultation number", "57", "Consultation No"),
 ];
 
 const PROCEDURE_FIELDS: FieldMeta[] = [
@@ -109,6 +112,45 @@ const IP_FIELDS: FieldMeta[] = [
   labeled("advanceText", "Advance paid", "5,000.00"),
   { key: "expenses", label: "Expenses (table)", sample: "", kind: "table" },
   labeled("balanceText", "Payable balance", "-500.00"),
+];
+
+// Advance-deposit receipt fields. Shared keys (letterhead, patient, payment
+// mode, footer) are picked FROM COMMON_FIELDS by key rather than re-declared, so
+// their kind/printLabel can never drift from the bill catalogs (KIND_BY_KEY and
+// PRINT_LABEL_BY_KEY below are global, later-wins maps - a re-declared key with
+// a different kind would silently corrupt every other type's wire format). The
+// advance-only keys are new names on purpose: `advanceAmountText` (the big
+// label-less figure) must be `plain`, but `advanceText` already exists in the ip
+// catalog as `labeled` - same name, different kind, would collide.
+function pickCommon(...keys: string[]): FieldMeta[] {
+  return keys.map((key) => {
+    const f = COMMON_FIELDS.find((c) => c.key === key);
+    if (!f) throw new Error(`pickCommon: "${key}" is not a COMMON field`);
+    return f;
+  });
+}
+
+const ADVANCE_FIELDS: FieldMeta[] = [
+  ...pickCommon("hospitalName", "hospitalTagline", "hospitalAddress", "hospitalPhone"),
+  // The admission id doubles as the receipt reference - no bill number exists
+  // until discharge (lib/printing/advance-receipt.ts).
+  labeled("receiptRef", "Receipt number (admission id)", "128", "Receipt No"),
+  labeled("admittedDateText", "Admitted date", "01 Jul 2026", "Date"),
+  ...pickCommon("patientCode", "patientName", "patientAgeGender", "patientPhone"),
+  ...pickCommon("paymentModeLabel"),
+  {
+    key: "advanceAmountText",
+    label: "Advance amount (big figure)",
+    sample: "₹5,000.00",
+    kind: "plain",
+  },
+  {
+    key: "advanceInWords",
+    label: "Advance amount in words",
+    sample: "Five Thousand Rupees Only",
+    kind: "plain",
+  },
+  ...pickCommon("footerNote"),
 ];
 
 // End-Day report fields (plan §4a). This is a report, not a bill, so it shares
@@ -130,6 +172,11 @@ const END_DAY_FIELDS: FieldMeta[] = [
   labeled("discountsText", "Discounts given", "450.00", "Discounts"),
   labeled("discountsApprovedText", "Discounts approved (amount + count)", "600.00 (2)", "Approved"),
   labeled("voidsText", "Voids (amount + count)", "1,200.00 (2)", "Voids"),
+  // The consultation split (lib/reports/summary.ts): the doctors' cut of the
+  // day's consultation collections and the hospital's remainder. Informational -
+  // the cut is still in the drawer, so neither figure moves moneyInText.
+  labeled("doctorShareText", "Doctor share (of consultations)", "2,400.00", "Doctor share"),
+  labeled("hospitalShareText", "Hospital share (consultations less doctor share)", "3,600.00", "Hospital share"),
   labeled("advancesText", "Admission advances", "5,000.00", "Advances"),
   labeled("advancesCountText", "Advances count", "1", "Advances count"),
   // Bills + advances, net of refunds: the figure that must match the physical till at
@@ -143,21 +190,26 @@ const END_DAY_FIELDS: FieldMeta[] = [
   labeled("activityTotalText", "Total actions", "19", "Actions"),
   { key: "modeTable", label: "By payment mode (table)", sample: "", kind: "table" },
   { key: "typeTable", label: "By bill type (table)", sample: "", kind: "table" },
+  // Per-doctor share rows. Not in the seeded default (no room in its fixed A4
+  // flow) - exposed so an admin can lay the per-doctor table into a custom design.
+  { key: "doctorShareTable", label: "Doctor share by doctor (table)", sample: "", kind: "table" },
   { key: "advanceModeTable", label: "Admission deposits by mode (table)", sample: "", kind: "table" },
   { key: "activityTable", label: "Activity (table)", sample: "", kind: "table" },
 ];
 
-// `advance` and `end_day` are part of BillType, but only `end_day` has a palette:
-// advance ships no catalog (plan §5), so it maps to no entry here.
+// `advance` and `end_day` don't take the full COMMON set: end_day is a report
+// (own keys only); advance is a self-contained receipt whose catalog already
+// picks the COMMON keys it shares (letterhead/patient/payment/footer).
 const FIELDS_BY_TYPE: Partial<Record<BillType, FieldMeta[]>> = {
   consultation: [...COMMON_FIELDS, ...CONSULTATION_FIELDS],
   procedure: [...COMMON_FIELDS, ...PROCEDURE_FIELDS],
   ip: [...COMMON_FIELDS, ...IP_FIELDS],
+  advance: ADVANCE_FIELDS,
   end_day: END_DAY_FIELDS,
 };
 
-// The palette for a given bill type - COMMON fields plus that type's own. A type
-// with no catalog (advance) has an empty palette rather than crashing.
+// The palette for a given bill type. A type with no catalog has an empty
+// palette rather than crashing.
 export function fieldsForType(type: BillType): FieldMeta[] {
   return FIELDS_BY_TYPE[type] ?? [];
 }
@@ -181,6 +233,7 @@ const KIND_BY_KEY: Record<string, FieldKind> = Object.fromEntries(
     ...CONSULTATION_FIELDS,
     ...PROCEDURE_FIELDS,
     ...IP_FIELDS,
+    ...ADVANCE_FIELDS,
     ...END_DAY_FIELDS,
   ].map((f) => [f.key, f.kind]),
 );
@@ -198,6 +251,7 @@ const PRINT_LABEL_BY_KEY: Record<string, string> = Object.fromEntries(
     ...CONSULTATION_FIELDS,
     ...PROCEDURE_FIELDS,
     ...IP_FIELDS,
+    ...ADVANCE_FIELDS,
     ...END_DAY_FIELDS,
   ].map((f) => [f.key, f.printLabel ?? f.label]),
 );
@@ -226,6 +280,8 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
       discountsText: "₹450.00",
       discountsApprovedText: "₹600.00 (2)",
       voidsText: "₹1,200.00 (2)",
+      doctorShareText: "₹2,400.00",
+      hospitalShareText: "₹3,600.00",
       advancesText: "₹5,000.00",
       advancesCountText: "1",
       moneyInText: "₹17,450.00",
@@ -241,6 +297,10 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
         { label: "Consultation", count: "12", amountText: "₹6,000.00" },
         { label: "Procedure", count: "5", amountText: "₹4,450.00" },
         { label: "In-patient", count: "1", amountText: "₹2,000.00" },
+      ],
+      doctorShareRows: [
+        { doctor: "Dr. Anita Rao", count: "8", amountText: "₹1,600.00" },
+        { doctor: "Dr. Suresh Kumar", count: "4", amountText: "₹800.00" },
       ],
       advanceModeRows: [
         { mode: "Cash", count: "1", amountText: "₹5,000.00" },
@@ -258,7 +318,9 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
 
   const common: BillDocument = {
     // end_day is handled above; the remaining sampled types are all bill types.
-    // (advance ships no sample - it simply falls through to the ip shape, unused.)
+    // (advance is NOT sampled here - it isn't a BillDocument; its sample lives in
+    // lib/printing/advance-receipt.ts's sampleAdvanceReceiptDocument, and the
+    // preview dialog branches on the type.)
     type: type as BillDocument["type"],
     locationId: "0", // sample data only - never a real location
     hospital: {
@@ -292,6 +354,7 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
       doctorName: "Dr. Anita Rao",
       reason: "Fever",
       validUntilText: "16 Jul 2026",
+      consultationNumber: "57",
     };
   }
   if (type === "procedure") {
@@ -348,6 +411,8 @@ function endDayRaw(doc: EndDayDocument): Record<string, string> {
     discountsText: doc.discountsText,
     discountsApprovedText: doc.discountsApprovedText,
     voidsText: doc.voidsText,
+    doctorShareText: doc.doctorShareText,
+    hospitalShareText: doc.hospitalShareText,
     advancesText: doc.advancesText,
     advancesCountText: doc.advancesCountText,
     moneyInText: doc.moneyInText,
@@ -355,6 +420,9 @@ function endDayRaw(doc: EndDayDocument): Record<string, string> {
     activityTotalText: doc.activityTotalText,
     modeTable: JSON.stringify(doc.modeRows.map((r) => [r.mode, r.count, r.amountText])),
     typeTable: JSON.stringify(doc.typeRows.map((r) => [r.label, r.count, r.amountText])),
+    doctorShareTable: JSON.stringify(
+      doc.doctorShareRows.map((r) => [r.doctor, r.count, r.amountText]),
+    ),
     advanceModeTable: JSON.stringify(
       doc.advanceModeRows.map((r) => [r.mode, r.count, r.amountText]),
     ),
@@ -400,6 +468,7 @@ export function billDocumentToInputs(doc: AnyBillDocument): Record<string, strin
     raw.doctorName = doc.doctorName;
     raw.reason = doc.reason ?? "";
     raw.validUntilText = doc.validUntilText;
+    raw.consultationNumber = doc.consultationNumber;
   } else if (doc.type === "procedure") {
     raw.items = JSON.stringify(doc.items.map((i) => [i.desc, i.qty, i.unitText, i.lineText]));
   } else {

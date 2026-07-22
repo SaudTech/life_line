@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BedDouble, Check, Loader2 } from "lucide-react";
+import { BedDouble, Check, Loader2, Printer } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { PaymentModeIcon } from "@/components/payment-mode-icon";
+import { printAdvanceReceipt } from "@/components/print-advance-receipt";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
 import { newPatientSchema, GENDERS } from "@/lib/patients/schema";
 import { zodFieldErrors } from "@/lib/forms/action-result";
 import { PAYMENT_MODES, type PaymentModeValue } from "@/lib/admissions/schema";
-import { lookupForAdmitAction, admitAction } from "@/lib/admissions/actions";
+import { lookupForAdmitAction, admitAction, type AdmitOutcome } from "@/lib/admissions/actions";
 import type { PatientRow } from "@/lib/patients/repository";
 
 const PHONE_RE = /^\d{10}$/;
@@ -26,11 +26,12 @@ const GENDER_OPTIONS: ComboboxOption[] = GENDERS.map((g) => ({
 
 // Admit an in-patient with an advance (plan §5b). Look up the patient by phone
 // (register-if-new, reusing the same intake as OPD/procedures), record the advance
-// + payment mode + optional room RATE/day, and save. On success the desk lands on
-// the admission's items page to add expenses (and print the advance receipt) - the
+// + payment mode + optional room RATE/day, and save. On success this screen shows
+// a confirmation (Admission #, advance receipt print) - mirrors the OPD/procedure
+// flows' own success screens - before the desk moves on to add expenses. The
 // number of room days is set later, at discharge. This screen computes no money.
-export function AdmitFlow() {
-  const router = useRouter();
+export function AdmitFlow({ advancePrintable }: { advancePrintable: boolean }) {
+  const [outcome, setOutcome] = useState<AdmitOutcome | null>(null);
   const [phone, setPhone] = useState("");
   const [matches, setMatches] = useState<PatientRow[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -114,15 +115,32 @@ export function AdmitFlow() {
         setSubmitting(false);
         return;
       }
-      // Land on the admission's items page (?admitted=1 shows the just-admitted
-      // banner with the advance-receipt print). Keep the spinner up through the
-      // navigation - don't clear submitting, so the button can't be re-fired.
-      router.push(`/admissions/${res.data!.admissionId}?admitted=1`);
+      setOutcome(res.data!);
     } catch {
       setFormError("Could not save - nothing was recorded. Please try again.");
       submittingRef.current = false;
       setSubmitting(false);
     }
+  }
+
+  function resetAll() {
+    setOutcome(null);
+    setPhone("");
+    setMatches(null);
+    setSelected(null);
+    setRegisterNew(false);
+    setNp({ name: "", age: "", gender: "", area: "" });
+    setNpErrors({});
+    setAdvance("");
+    setRoomRate("");
+    setPayMode("cash");
+    submittingRef.current = false;
+    setSubmitting(false);
+    setFormError(null);
+  }
+
+  if (outcome) {
+    return <SuccessScreen outcome={outcome} advancePrintable={advancePrintable} onReset={resetAll} />;
   }
 
   return (
@@ -349,6 +367,79 @@ export function AdmitFlow() {
             Find or register a patient to record the advance.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Success screen ───────────────────────────────────────────────────────────
+// Mirrors app/(dashboard)/consultations/consultation-flow.tsx's SuccessScreen:
+// the admission's OWN id (created here, well before any bill exists - the
+// discharge invoice's bill_number comes later) is the headline, not a bill
+// number. Print is the advance receipt, gated by the server-resolved template
+// check (print-updates §1c) - never shown when no design exists to print it.
+function SuccessScreen({
+  outcome,
+  advancePrintable,
+  onReset,
+}: {
+  outcome: AdmitOutcome;
+  advancePrintable: boolean;
+  onReset: () => void;
+}) {
+  const printBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    printBtnRef.current?.focus();
+  }, []);
+
+  const rows: [string, string][] = [
+    ["Patient", `${outcome.patientName} · ${outcome.patientCode}`],
+    ["Advance paid", `₹${formatPaise(outcome.advancePaise)}`],
+    ["Payment", PAY_LABELS[outcome.paymentMode]],
+  ];
+  if (outcome.roomRatePaise != null) {
+    rows.push(["Room rate", `₹${formatPaise(outcome.roomRatePaise)}/day`]);
+  }
+
+  return (
+    <div className="mx-auto max-w-md pt-4">
+      <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="border-b border-primary/20 bg-accent px-6 py-8 text-center">
+          <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <Check className="size-7" aria-hidden />
+          </div>
+          <h1 className="text-xl font-bold text-foreground">Patient admitted</h1>
+          <p className="mt-1 text-sm text-accent-foreground">
+            Admission <b>#{outcome.admissionId}</b> · add expenses any time before discharge.
+          </p>
+        </div>
+        <dl className="px-6 py-5">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-4 border-b border-border/60 py-2.5 last:border-b-0 text-sm">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="text-right font-medium text-foreground">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="flex flex-col gap-2 px-6 pb-6">
+          {advancePrintable ? (
+            <Button
+              ref={printBtnRef}
+              type="button"
+              className="w-full"
+              onClick={() => printAdvanceReceipt(outcome.admissionId)}
+            >
+              <Printer aria-hidden />
+              Print advance receipt
+            </Button>
+          ) : null}
+          <Button asChild variant={advancePrintable ? "outline" : "default"} className="w-full">
+            <Link href={`/admissions/${outcome.admissionId}`}>Go to admission</Link>
+          </Button>
+          <Button type="button" variant="ghost" className="w-full" onClick={onReset}>
+            Admit another patient
+          </Button>
+        </div>
       </div>
     </div>
   );

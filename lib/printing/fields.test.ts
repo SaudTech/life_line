@@ -10,7 +10,8 @@ import {
 } from "./fields";
 
 // `end_day` is a designable report template (print-updates plan §4); `advance`
-// has no catalog/sample, so it isn't exercised here.
+// isn't a BillDocument, so its catalog/mapper sync is covered in
+// advance-receipt.test.ts instead of here.
 const TYPES: BillType[] = ["consultation", "procedure", "ip", "end_day"];
 
 describe("fields catalog / resolver output stay in sync", () => {

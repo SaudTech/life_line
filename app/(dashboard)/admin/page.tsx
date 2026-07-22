@@ -5,7 +5,11 @@ import { ArrowRight } from "lucide-react";
 import { requireAdmin } from "@/lib/auth/dal";
 import { getUserName, listRecentActivity } from "@/lib/users/repository";
 import { getReportContext } from "@/lib/reports/repository";
-import { getFirstRevenueDay, getRevenueByDay } from "@/lib/dashboard/repository";
+import {
+  getDoctorShareTotal,
+  getFirstRevenueDay,
+  getRevenueByDay,
+} from "@/lib/dashboard/repository";
 import { FinancialOverview } from "./financial-overview";
 import { RevenueChart } from "./revenue-chart";
 import { RecentInvoices } from "./recent-invoices";
@@ -42,12 +46,22 @@ async function AllTimeRevenue({ locationId }: { locationId: string }) {
   if (!firstDay) {
     return <RevenueChart data={[]} title="Total revenue (all time)" total={0} />;
   }
-  const rows = await getRevenueByDay(firstDay, clinicDay, locationId);
+  // The all-time doctors' cut rides along so the card can show the split: gross
+  // revenue, less doctors' share, hospital net. The subtraction happens HERE on the
+  // server (the chart only renders what it is given), and the share is informational -
+  // it is inside the gross figure, not a second movement of money (lib/doctors/share.ts).
+  const [rows, doctorSharePaise] = await Promise.all([
+    getRevenueByDay(firstDay, clinicDay, locationId),
+    getDoctorShareTotal(firstDay, clinicDay, locationId),
+  ]);
+  const total = sumPaise(rows.map((r) => r.paise));
   return (
     <RevenueChart
       data={rows}
       title="Total revenue (all time)"
-      total={sumPaise(rows.map((r) => r.paise))}
+      total={total}
+      doctorSharePaise={doctorSharePaise}
+      hospitalNetPaise={total - doctorSharePaise}
     />
   );
 }

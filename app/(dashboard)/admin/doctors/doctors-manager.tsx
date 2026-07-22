@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { setDoctorActiveAction } from "@/lib/doctors/actions";
 import type { DoctorListRow } from "@/lib/doctors/repository";
+import type { DepartmentRow } from "@/lib/departments/repository";
 import { DoctorFormDialog } from "./doctor-form-dialog";
 import { DoctorCard } from "./doctor-card";
 import { DoctorRow } from "./doctor-row";
@@ -27,7 +28,13 @@ type DialogState = { type: "add" | "edit"; doctorId: string | null } | null;
 // fully preloaded, so this filters in memory rather than round-tripping to the
 // server - unlike the paginated history lists). Mutations run in the server
 // actions, which revalidate the page so fresh `doctors` flow back as props.
-export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
+export function DoctorsManager({
+  doctors,
+  departments,
+}: {
+  doctors: DoctorListRow[];
+  departments: DepartmentRow[];
+}) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -216,10 +223,20 @@ export function DoctorsManager({ doctors }: { doctors: DoctorListRow[] }) {
       )}
 
       {dialog?.type === "add" ? (
-        <DoctorFormDialog mode="add" doctor={null} onClose={() => setDialog(null)} />
+        <DoctorFormDialog
+          mode="add"
+          doctor={null}
+          departments={departments}
+          onClose={() => setDialog(null)}
+        />
       ) : null}
       {dialog?.type === "edit" && activeDoctor ? (
-        <DoctorFormDialog mode="edit" doctor={activeDoctor} onClose={() => setDialog(null)} />
+        <DoctorFormDialog
+          mode="edit"
+          doctor={activeDoctor}
+          departments={departments}
+          onClose={() => setDialog(null)}
+        />
       ) : null}
     </div>
   );

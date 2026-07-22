@@ -35,6 +35,7 @@ describe("buildConsultationDocument", () => {
       doctorName: "Dr. Anita",
       reason: "Fever",
       validUntilText: "16 Jul 2026",
+      consultationNumber: "57",
     });
     expect(doc.type).toBe("consultation");
     expect(doc.hospital).toEqual({
@@ -58,12 +59,13 @@ describe("buildConsultationDocument", () => {
     expect(doc.doctorName).toBe("Dr. Anita");
     expect(doc.reason).toBe("Fever");
     expect(doc.validUntilText).toBe("16 Jul 2026");
+    expect(doc.consultationNumber).toBe("57");
   });
 
   it("shows a discount line only when a discount was applied", () => {
     const doc = buildConsultationDocument(
       { ...BASE_CORE, discountPaise: "5000", totalPaise: "45000" },
-      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026" },
+      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026", consultationNumber: "57" },
     );
     expect(doc.totals.discountText).toBe("₹50.00");
     expect(doc.reason).toBeUndefined();
@@ -72,13 +74,13 @@ describe("buildConsultationDocument", () => {
   it("surfaces a watermark label for pending/void bills", () => {
     const pending = buildConsultationDocument(
       { ...BASE_CORE, status: "pending_approval" },
-      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026" },
+      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026", consultationNumber: "57" },
     );
     expect(pending.bill.statusLabel).toBe("PENDING APPROVAL");
 
     const voided = buildConsultationDocument(
       { ...BASE_CORE, status: "void" },
-      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026" },
+      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026", consultationNumber: "57" },
     );
     expect(voided.bill.statusLabel).toBe("VOID");
   });
@@ -86,7 +88,7 @@ describe("buildConsultationDocument", () => {
   it("omits ageGender when neither is known", () => {
     const doc = buildConsultationDocument(
       { ...BASE_CORE, patientAge: null, patientGender: null },
-      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026" },
+      { doctorName: "Dr. Anita", reason: null, validUntilText: "16 Jul 2026", consultationNumber: "57" },
     );
     expect(doc.patient.ageGender).toBeUndefined();
   });

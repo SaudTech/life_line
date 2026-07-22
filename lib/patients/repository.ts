@@ -97,6 +97,14 @@ export async function recentPatients(limit = 10): Promise<PatientRow[]> {
   return rows;
 }
 
+// Total registered patients - shown as a header count on the master list.
+export async function countPatients(): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM patients`,
+  );
+  return Number(rows[0].count);
+}
+
 // A single patient by id - for prefilling the edit form / detail views.
 export async function getPatient(id: string): Promise<PatientRow | null> {
   const { rows } = await pool.query<PatientRow>(

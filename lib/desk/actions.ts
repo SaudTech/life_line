@@ -30,8 +30,8 @@ export const DESK_ACTIONS: readonly DeskAction[] = [
   { key: "proc_new",  href: "/procedures",            label: "New procedure bill",     description: "Bill services from the catalogue",              icon: "receipt",       group: "bill",     roles: ["op_desk", "op_ip_desk", "supervisor", "admin"] },
   { key: "ipd_admit", href: "/admissions/new",        label: "Admit patient",          description: "Open an inpatient stay with advance deposit",   icon: "bedDouble",     group: "bill",     roles: ["admin", "op_ip_desk", "supervisor"] },
   { key: "ipd_ward",  href: "/admissions",            label: "Inpatients & discharge", description: "Running expenses, discharge & final bill",      icon: "clipboardList", group: "manage",   roles: ["admin", "op_ip_desk", "supervisor"] },
-  { key: "opd_hist",  href: "/consultations/history", label: "OPD history",            description: "Reprint, void or re-issue OPD bills",           icon: "history",       group: "manage",   roles: ["admin", "op_ip_desk", "supervisor"] },
-  { key: "proc_hist", href: "/procedures/history",    label: "Procedure history",      description: "Reprint, void or re-issue procedure bills",     icon: "history",       group: "manage",   roles: ["op_desk", "op_ip_desk", "supervisor", "admin"] },
+  { key: "opd_hist",  href: "/consultations/history", label: "OPD history",            description: "View, void or re-issue OPD bills",              icon: "history",       group: "manage",   roles: ["admin", "op_ip_desk", "supervisor"] },
+  { key: "proc_hist", href: "/procedures/history",    label: "Procedure history",      description: "View, void or re-issue procedure bills",         icon: "history",       group: "manage",   roles: ["op_desk", "op_ip_desk", "supervisor", "admin"] },
   { key: "patients",  href: "/patients",              label: "Patient records",        description: "Search the full patient master list",           icon: "users",         group: "manage",   roles: ["admin"] },
   { key: "my_day",    href: "/reports",               label: "My day",                 description: "Everything you did & collected today",          icon: "barChart",      group: "closeout" },
 ];

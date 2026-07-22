@@ -27,7 +27,7 @@ type DialogState = { type: "add" } | { type: "edit"; patient: PatientRow } | nul
 //
 // One phone number can list SEVERAL patients (mother + child) - that's expected,
 // not a bug, and the results are never deduped by phone.
-export function PatientsManager({ recent }: { recent: PatientRow[] }) {
+export function PatientsManager({ recent, total }: { recent: PatientRow[]; total: number }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientRow[]>([]);
   const [pending, setPending] = useState(false);
@@ -79,7 +79,12 @@ export function PatientsManager({ recent }: { recent: PatientRow[] }) {
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Patients</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Patients</h1>
+            <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-accent-foreground">
+              {total.toLocaleString()} total
+            </span>
+          </div>
           <p className="mt-1 text-sm font-medium text-muted-foreground">
             Search by phone, name, or patient ID, register new patients, and edit details.
           </p>

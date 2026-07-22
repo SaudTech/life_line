@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { PaymentModeIcon } from "@/components/payment-mode-icon";
 import { printReceipt } from "@/components/print-receipt";
 import { ServiceCombobox } from "@/components/service-combobox";
+import { QtyField } from "@/components/qty-field";
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
 import type { ServiceRow } from "@/lib/services/repository";
@@ -564,28 +565,9 @@ export function ProcedureFlow({
                         onChange={(serviceId) => updateLine(line.key, { serviceId })}
                         className="flex-1"
                       />
-                      <input
+                      <QtyField
                         value={line.quantity}
-                        onChange={(e) =>
-                          updateLine(line.key, { quantity: e.target.value.replace(/\D/g, "").slice(0, 4) })
-                        }
-                        onKeyDown={(e) => {
-                          // A quantity field is a counter, not free text - all
-                          // four arrows step it by 1 rather than moving the
-                          // caret, so an operator can adjust without touching
-                          // the mouse (dev-rules §5, keyboard-first).
-                          if (["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"].includes(e.key)) {
-                            e.preventDefault();
-                            const step = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1 : -1;
-                            const next = Math.max(1, (Number(line.quantity) || 0) + step);
-                            updateLine(line.key, { quantity: String(next) });
-                          }
-                        }}
-                        type="text"
-                        inputMode="numeric"
-                        aria-label="Quantity"
-                        placeholder="Qty"
-                        className="h-10 w-16 rounded-lg border bg-background px-2 text-center text-sm text-foreground outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary"
+                        onChange={(quantity) => updateLine(line.key, { quantity })}
                       />
                       <span className="w-24 shrink-0 text-right text-sm font-semibold text-foreground">
                         {service && priced ? `₹${formatPaise(priced.lineTotalPaise)}` : "—"}
