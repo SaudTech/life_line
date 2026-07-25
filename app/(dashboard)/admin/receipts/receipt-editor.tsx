@@ -72,20 +72,34 @@ const PAPER_PRESETS = [
   { key: "a5", label: "A5", width: 148, height: 210 },
 ] as const;
 
-// Read a template's page size + reserved top band (basePdf) for seeding the size
-// controls. Defaults to A4 with no reserved band if the design carries a raw/PDF
-// basePdf rather than the {width,height,padding} object our templates use.
-function readBasePdf(t: Template): { width: number; height: number; topMm: number } {
+// pdfme's basePdf.padding is [top, right, bottom, left] in mm - the printable
+// margin on each edge. `top` is the reserved letterhead band (it has its own
+// control, because growing it also shifts the fields below it); the other three
+// are plain page margins, editable in the toolbar.
+type Padding = [number, number, number, number];
+
+const DEFAULT_MARGIN_MM = 10;
+
+// Read a template's page size + margins (basePdf) for seeding the size controls.
+// Defaults to A4 with 10mm side/bottom margins and no reserved band if the design
+// carries a raw/PDF basePdf rather than the {width,height,padding} object our
+// templates use.
+function readBasePdf(t: Template): { width: number; height: number; padding: Padding } {
   const base = (t as { basePdf?: unknown }).basePdf;
   if (base && typeof base === "object" && "width" in base) {
     const b = base as { width?: number; height?: number; padding?: number[] };
+    const p = b.padding ?? [];
+    // 0 is a legitimate margin (a full-bleed edge), so fall back only on a
+    // missing/unparseable value, never on a falsy one.
+    const mm = (v: unknown, fallback: number) =>
+      Number.isFinite(Number(v)) ? Number(v) : fallback;
     return {
       width: Number(b.width) || 210,
       height: Number(b.height) || 297,
-      topMm: Number(b.padding?.[0]) || 0,
+      padding: [mm(p[0], 0), mm(p[1], DEFAULT_MARGIN_MM), mm(p[2], DEFAULT_MARGIN_MM), mm(p[3], DEFAULT_MARGIN_MM)],
     };
   }
-  return { width: 210, height: 297, topMm: 0 };
+  return { width: 210, height: 297, padding: [0, DEFAULT_MARGIN_MM, DEFAULT_MARGIN_MM, DEFAULT_MARGIN_MM] };
 }
 
 // Editor for ONE design (plan §4b). The bill type is fixed (row.bill_type), so
@@ -112,31 +126,23 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
   const initialBase = readBasePdf(row.schema_json);
   const [paperW, setPaperW] = useState<number>(initialBase.width);
   const [paperH, setPaperH] = useState<number>(initialBase.height);
-  const [topMm, setTopMm] = useState<number>(initialBase.topMm);
+  // [top, right, bottom, left] in mm. `top` is the reserved letterhead band;
+  // the other three are the page margins the toolbar now exposes (they used to
+  // be hardcoded to 10mm with no way to change them).
+  const [padding, setPadding] = useState<Padding>(initialBase.padding);
+  const topMm = padding[0];
 
-  // Push a new size / letterhead offset onto the live template's basePdf, keeping
-  // the side/bottom margins. Size persists automatically - it's part of schema_json
-  // saved by the existing update/create actions (no schema/repository change, §2).
-  function applyBasePdf(next: { width: number; height: number; topMm: number }) {
+  // Push a new size / margins onto the live template's basePdf. Size and margins
+  // persist automatically - they're part of schema_json, saved by the existing
+  // update/create actions (no schema/repository change, §2). `schemas` is passed
+  // only when the same update must also move fields (the letterhead band).
+  function applyBasePdf(next: { width: number; height: number; padding: Padding }, schemas?: Template["schemas"]) {
     if (!handleRef.current) return;
     const current = handleRef.current.getTemplate();
-    const base = current.basePdf;
-    const padding =
-      base && typeof base === "object" && "padding" in base
-        ? (base as { padding?: [number, number, number, number] }).padding ?? [10, 10, 10, 10]
-        : [10, 10, 10, 10];
     const updated = {
       ...current,
-      basePdf: {
-        width: next.width,
-        height: next.height,
-        padding: [next.topMm, padding[1] ?? 10, padding[2] ?? 10, padding[3] ?? 10] as [
-          number,
-          number,
-          number,
-          number,
-        ],
-      },
+      ...(schemas ? { schemas } : {}),
+      basePdf: { width: next.width, height: next.height, padding: next.padding },
     } as Template;
     handleRef.current.updateTemplate(updated);
   }
@@ -165,7 +171,25 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
     }
     setPaperW(width);
     setPaperH(height);
-    applyBasePdf({ width, height, topMm });
+    applyBasePdf({ width, height, padding });
+  }
+
+  // Page margins (right / bottom / left, mm) - the printable inset pdfme keeps
+  // clear on each edge. Purely a basePdf change: unlike the letterhead band it
+  // does not move existing fields, so nothing on the canvas jumps. Clamped so the
+  // two opposite margins can never swallow the page (min 20mm of usable width /
+  // height left), and reversible - type the old number back.
+  function setMargin(edge: 1 | 2 | 3, mm: number) {
+    const limit = edge === 2 ? paperH - padding[0] - 20 : paperW - 20;
+    const opposite = edge === 1 ? padding[3] : edge === 3 ? padding[1] : 0;
+    const clamped = Math.max(0, Math.min(mm, Math.max(0, limit - opposite)));
+    if (clamped !== mm) {
+      toast.warning("Margin trimmed - it would leave no room for content.");
+    }
+    const next = [...padding] as Padding;
+    next[edge] = clamped;
+    setPadding(next);
+    applyBasePdf({ width: paperW, height: paperH, padding: next });
   }
 
   // Resizing the reserved band shifts every field on page 1 by the same delta,
@@ -175,14 +199,8 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
   function setLetterheadTop(mm: number) {
     const clamped = Math.max(0, Math.min(mm, paperH));
     const delta = clamped - topMm;
-    setTopMm(clamped);
     if (!handleRef.current) return;
     const current = handleRef.current.getTemplate();
-    const base = current.basePdf;
-    const padding =
-      base && typeof base === "object" && "padding" in base
-        ? (base as { padding?: [number, number, number, number] }).padding ?? [10, 10, 10, 10]
-        : [10, 10, 10, 10];
     const schemas =
       delta !== 0
         ? current.schemas.map((page, i) =>
@@ -195,21 +213,9 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
               : page,
           )
         : current.schemas;
-    const updated = {
-      ...current,
-      schemas,
-      basePdf: {
-        width: paperW,
-        height: paperH,
-        padding: [clamped, padding[1] ?? 10, padding[2] ?? 10, padding[3] ?? 10] as [
-          number,
-          number,
-          number,
-          number,
-        ],
-      },
-    } as Template;
-    handleRef.current.updateTemplate(updated);
+    const next = [clamped, padding[1], padding[2], padding[3]] as Padding;
+    setPadding(next);
+    applyBasePdf({ width: paperW, height: paperH, padding: next }, schemas);
   }
 
   // Appends one raw pdfme schema object onto the first page at a naive stacked
@@ -512,6 +518,38 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
             onCommit={setLetterheadTop}
           />
           <span className="text-xs text-muted-foreground">mm top</span>
+        </div>
+
+        {/* Page margins (mm). The top edge is the Reserved letterhead control
+            above - these are the other three, which used to be fixed at 10mm
+            with no way to change them. */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Margins</span>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            L
+            <MmInput
+              value={padding[3]}
+              ariaLabel="Left margin in millimetres"
+              onCommit={(v) => setMargin(3, v)}
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            R
+            <MmInput
+              value={padding[1]}
+              ariaLabel="Right margin in millimetres"
+              onCommit={(v) => setMargin(1, v)}
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            B
+            <MmInput
+              value={padding[2]}
+              ariaLabel="Bottom margin in millimetres"
+              onCommit={(v) => setMargin(2, v)}
+            />
+          </label>
+          <span className="text-xs text-muted-foreground">mm</span>
         </div>
       </div>
 
