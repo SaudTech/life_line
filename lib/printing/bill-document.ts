@@ -35,6 +35,11 @@ export interface BillDocument {
 
 export type ConsultationBillDocument = BillDocument & {
   type: "consultation";
+  // Not a template field (never in the field catalog) - carried like locationId
+  // so the print route can resolve this doctor's own consultation design
+  // (migration 0024). Optional: a sample/preview document has no doctor, and an
+  // absent id simply means "print the location's active design".
+  doctorId?: string;
   doctorName: string;
   reason?: string;
   validUntilText: string;
@@ -178,6 +183,7 @@ export interface BillDocumentCore {
 export function buildConsultationDocument(
   core: BillDocumentCore,
   consultation: {
+    doctorId?: string;
     doctorName: string;
     reason: string | null;
     validUntilText: string;
@@ -187,6 +193,7 @@ export function buildConsultationDocument(
   return {
     ...buildCommon(core),
     type: "consultation",
+    doctorId: consultation.doctorId,
     doctorName: consultation.doctorName,
     reason: consultation.reason ?? undefined,
     validUntilText: consultation.validUntilText,

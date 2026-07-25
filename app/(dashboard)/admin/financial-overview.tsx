@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   getCurrentCensus,
   getDepartmentRevenue,
+  getDoctorShareTotal,
   getInPatientRevenue,
   getPatientCounts,
   getPendingApprovalCount,
@@ -57,12 +58,20 @@ function RevenueCard({
   change,
   series,
   footer,
+  doctorSharePaise,
+  hospitalNetPaise,
 }: {
   title: string;
   paise: number;
   change: ChangeResult;
   series: number[];
   footer: string;
+  // Optional split of `paise`: the doctors' cut of consultation money and what
+  // the hospital keeps after it (server-computed, like every figure here). Shown
+  // as a compact line under the headline - same reading as the all-time card and
+  // the daily report's consultation split.
+  doctorSharePaise?: number;
+  hospitalNetPaise?: number;
 }) {
   const isUp = change.direction === "up";
   const isDown = change.direction === "down";
@@ -101,6 +110,18 @@ function RevenueCard({
         />
       </div>
 
+      {doctorSharePaise != null && hospitalNetPaise != null ? (
+        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-[11px] font-medium sm:text-xs">
+          <span className="text-muted-foreground">
+            Doctors&apos; share{" "}
+            <span className="tabular-nums">-₹{formatPaise(doctorSharePaise)}</span>
+          </span>
+          <span className="font-bold text-foreground">
+            Hospital <span className="tabular-nums">₹{formatPaise(hospitalNetPaise)}</span>
+          </span>
+        </div>
+      ) : null}
+
       <div className="mt-1.5 text-[11px] font-medium text-muted-foreground sm:text-xs">
         {footer}
       </div>
@@ -114,7 +135,7 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
   const mtd = monthToDateRange(today);
   const prevMtd = prevMonthComparableRange(today);
 
-  const [rev7, revMtd, revPrevMtd, patients, deptRows, inPatientPaise, census, pending] =
+  const [rev7, revMtd, revPrevMtd, patients, deptRows, inPatientPaise, census, pending, shareToday] =
     await Promise.all([
       getRevenueByDay(sparkStart, today, locationId),
       getRevenueByDay(mtd.from, mtd.to, locationId),
@@ -124,6 +145,9 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
       getInPatientRevenue(today, today, locationId),
       getCurrentCensus(locationId),
       getPendingApprovalCount(locationId),
+      // Today's doctors' cut, for the Revenue-today split (same tested rule the
+      // daily report and the all-time card use - lib/doctors/share.ts).
+      getDoctorShareTotal(today, today, locationId),
     ]);
 
   // Today card: pull today + yesterday out of the zero-filled 7-day series so the
@@ -171,6 +195,8 @@ export async function FinancialOverview({ locationId }: { locationId: string }) 
         paise={todayRevenue}
         change={todayChange}
         series={series7}
+        doctorSharePaise={shareToday}
+        hospitalNetPaise={todayRevenue - shareToday}
         footer={
           yesterdayRevenue > 0
             ? `vs ₹${formatPaise(yesterdayRevenue)} yesterday`

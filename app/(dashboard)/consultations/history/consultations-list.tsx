@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Search, Loader2, Stethoscope, X } from "lucide-react";
+import { ArrowLeft, Copy, Paperclip, Search, Loader2, Stethoscope, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { printReceipt } from "@/components/print-receipt";
 import { BillRowActions } from "@/components/bill-row-actions";
 import { VoidBillDialog, type VoidableBill } from "@/components/void-bill-dialog";
+import { RecordDocumentsDialog } from "@/components/record-documents-dialog";
 import { formatPaise } from "@/lib/money";
 import { listConsultationsAction } from "@/lib/consultations/actions";
 import type { ConsultationListRow } from "@/lib/consultations/repository";
@@ -54,6 +55,8 @@ export function ConsultationsList({
   initial,
   printable,
   todayIso,
+  canManageBills,
+  canDeleteDocuments,
 }: {
   initial: ConsultationListRow[];
   // Server-resolved Print (reprint) gate: a design must exist for this
@@ -63,12 +66,18 @@ export function ConsultationsList({
   // Clinic "today" (server-reckoned) - caps the day stepper so it can never
   // step forward into a day that has no data yet.
   todayIso: string;
+  // op_desk sees the list (to attach/view documents) but no bill actions -
+  // void/re-issue/print are each server-gated regardless.
+  canManageBills: boolean;
+  // Admin-only: delete an attached document (server-gated in the action).
+  canDeleteDocuments: boolean;
 }) {
   const router = useRouter();
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [rows, setRows] = useState<ConsultationListRow[]>(initial);
   const [pending, setPending] = useState(false);
   const [voidTarget, setVoidTarget] = useState<VoidableBill | null>(null);
+  const [docTarget, setDocTarget] = useState<ConsultationListRow | null>(null);
   const latest = useRef(0);
 
   const hasFilters = Object.entries(filters).some(
@@ -98,13 +107,16 @@ export function ConsultationsList({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <Link
-        href="/consultations"
-        className="mb-5 inline-flex w-fit items-center gap-1.5 rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        New consultation
-      </Link>
+      {/* op_desk can't start consultations - don't show a link that would bounce. */}
+      {canManageBills ? (
+        <Link
+          href="/consultations"
+          className="mb-5 inline-flex w-fit items-center gap-1.5 rounded text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowLeft className="size-4" aria-hidden />
+          New consultation
+        </Link>
+      ) : null}
 
       <div className="mb-5">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Consultations</h1>
@@ -156,7 +168,10 @@ export function ConsultationsList({
 
       {rows.length > 0 ? (
         <div className="overflow-hidden rounded-xl border bg-card">
-          <div className="overflow-x-auto">
+          {/* [contain:layout]: a table wider than this scroller leaks its min-content
+              into the document's scroll area (Chromium quirk) - the page itself would
+              pan sideways on phones even though the table scrolls in here. */}
+          <div className="overflow-x-auto [contain:layout]">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left">
@@ -245,7 +260,16 @@ export function ConsultationsList({
                       ) : null}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">
-                      {c.bill_id ? (
+                      <button
+                        type="button"
+                        onClick={() => setDocTarget(c)}
+                        title="Documents (scans, case studies)"
+                        aria-label={`Documents for consultation ${c.id}`}
+                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Paperclip className="size-4" aria-hidden />
+                      </button>
+                      {canManageBills && c.bill_id ? (
                         <BillRowActions
                           isCancelled={isVoid}
                           replaced={!!c.replaced_by_number}
@@ -296,6 +320,17 @@ export function ConsultationsList({
           ) : null}
         </div>
       )}
+
+      {docTarget ? (
+        <RecordDocumentsDialog
+          recordType="opd"
+          recordId={docTarget.id}
+          patientName={docTarget.patient_name}
+          patientCode={docTarget.patient_code}
+          canDelete={canDeleteDocuments}
+          onClose={() => setDocTarget(null)}
+        />
+      ) : null}
 
       {voidTarget ? (
         <VoidBillDialog

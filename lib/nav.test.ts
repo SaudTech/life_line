@@ -56,10 +56,14 @@ describe("navItemsForRole", () => {
     expect(items.every((i) => i.href.startsWith("/"))).toBe(true);
   });
 
-  it("gives the OP-only desk the Counter, Procedures, and My Day links", () => {
+  it("gives the OP-only desk the Counter, Procedures, read-only OPD/IPD lists, and My Day", () => {
     expect(navItemsForRole("op_desk")).toEqual([
       { href: "/desk", label: "Counter" },
       { href: "/procedures", label: "Procedures" },
+      // The documents plan opens the LISTS to every staff role; op_desk's OPD
+      // link goes straight to the history list, never the intake flow.
+      { href: "/consultations/history", label: "OPD" },
+      { href: "/admissions", label: "IPD" },
       { href: "/reports", label: "My Day" },
     ]);
   });

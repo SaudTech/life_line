@@ -6,8 +6,10 @@ import {
   emptyMoneyRaw,
   type ActivityCountRow,
   type DoctorShareRow,
+  type DocumentComplianceRaw,
   type MoneyGroupRow,
   type MoneyRaw,
+  type PendingDocumentRow,
 } from "./summary";
 
 // Data access for the daily report (plan §4). Thin: the queries only - no money
@@ -237,6 +239,73 @@ export async function getMoneySummary(
       count: rf.rows[0]?.count ?? 0,
       totalPaise: toPaise(rf.rows[0]?.total_paise ?? null),
     },
+  };
+}
+
+// Document upload compliance for the day report: of the consultations the subject
+// billed and the admissions they DISCHARGED in the range, which still have no live
+// scanned documents (patient_documents, deleted rows excluded). Attribution
+// mirrors getMoneySummary exactly - the FINAL bill's created_by is who "did" the
+// record (a consultation always creates its consultation bill in the same
+// transaction; a discharge always creates its final ip bill) - so the pending
+// counts line up with the money figures on the same sheet. The document check is
+// LIVE (not range-bound): uploading tomorrow clears today's pending line, which is
+// the honest reading of "pending work still to perform".
+export async function getDocumentCompliance(
+  userId: string | null,
+  fromDay: IsoDay,
+  toDay: IsoDay,
+  locationId: string,
+): Promise<DocumentComplianceRaw> {
+  const args = [userId, fromDay, toDay, locationId];
+
+  // "The subject produced this record in the range", as an EXISTS over final
+  // bills - shared shape for both kinds. DISTINCT via the parent row, so a
+  // re-issued discharge bill can never count its admission twice.
+  const opdScope = `EXISTS (
+    SELECT 1 FROM bills b
+     WHERE b.consultation_id = c.id AND b.type = 'consultation' AND b.status = 'final'
+       AND ($1::uuid IS NULL OR b.created_by = $1) AND b.location_id = $4
+       AND ${clinicRange("b.created_at", 2, 3)})`;
+  const ipdScope = `EXISTS (
+    SELECT 1 FROM bills b
+     WHERE b.admission_id = a.id AND b.type = 'ip' AND b.status = 'final'
+       AND ($1::uuid IS NULL OR b.created_by = $1) AND b.location_id = $4
+       AND ${clinicRange("b.created_at", 2, 3)})`;
+
+  const opdTotal = pool.query<{ total: number }>(
+    `SELECT count(*)::int AS total FROM consultations c WHERE ${opdScope}`,
+    args,
+  );
+  const opdPending = pool.query<PendingDocumentRow>(
+    `SELECT c.id::text AS "recordId", p.name AS "patientName", p.patient_code AS "patientCode"
+       FROM consultations c
+       JOIN patients p ON p.id = c.patient_id
+      WHERE ${opdScope}
+        AND NOT EXISTS (SELECT 1 FROM patient_documents d
+                         WHERE d.consultation_id = c.id AND d.deleted_at IS NULL)
+      ORDER BY c.id ASC`,
+    args,
+  );
+  const ipdTotal = pool.query<{ total: number }>(
+    `SELECT count(*)::int AS total FROM admissions a WHERE ${ipdScope}`,
+    args,
+  );
+  const ipdPending = pool.query<PendingDocumentRow>(
+    `SELECT a.id::text AS "recordId", p.name AS "patientName", p.patient_code AS "patientCode"
+       FROM admissions a
+       JOIN patients p ON p.id = a.patient_id
+      WHERE ${ipdScope}
+        AND NOT EXISTS (SELECT 1 FROM patient_documents d
+                         WHERE d.admission_id = a.id AND d.deleted_at IS NULL)
+      ORDER BY a.id ASC`,
+    args,
+  );
+
+  const [ot, op, it, ip] = await Promise.all([opdTotal, opdPending, ipdTotal, ipdPending]);
+  return {
+    opd: { total: ot.rows[0]?.total ?? 0, pending: op.rows },
+    ipd: { total: it.rows[0]?.total ?? 0, pending: ip.rows },
   };
 }
 

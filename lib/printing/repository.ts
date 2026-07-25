@@ -2,6 +2,7 @@ import type { Template } from "@pdfme/common";
 import { pool } from "@/lib/db";
 import type { BillType } from "./fields";
 import { DEFAULT_TEMPLATES, getDefaultTemplate } from "./defaults";
+import { isUsableConsultationTemplate } from "./consultation-template";
 
 // Data access for bill_templates (plan §4). Thin: each function is one
 // operation and nothing more - no validation, no pdfme-specific logic beyond
@@ -51,6 +52,79 @@ export async function getActiveTemplate(
     [locationId, type, `Default ${type} receipt`, JSON.stringify(getDefaultTemplate(type))],
   );
   return seeded.rows[0];
+}
+
+// The design a CONSULTATION prints on (migration 0024): the doctor's own
+// assigned design when they have a usable one, otherwise the location's active
+// consultation design (getActiveTemplate, unchanged - it still lazily seeds the
+// checked-in default). The usability rule itself is the pure, tested
+// isUsableConsultationTemplate; this function only fetches the candidate.
+//
+// Resolution is LIVE, never snapshotted on the bill: a reprint uses whatever
+// design the doctor points at today, exactly as editing the active design has
+// always affected reprints.
+//
+// `doctorId` is optional so a document without one (a preview sample, or a bill
+// whose doctor could not be resolved) simply gets the default design.
+export async function getConsultationTemplate(
+  doctorId: string | null | undefined,
+  locationId: string,
+): Promise<BillTemplateRow> {
+  if (doctorId) {
+    const { rows } = await pool.query<BillTemplateRow & { location_id: string }>(
+      `SELECT t.id, t.bill_type, t.name, t.schema_json, t.is_active, t.updated_at,
+              t.location_id::text AS location_id
+         FROM doctors d
+         JOIN bill_templates t ON t.id = d.consultation_template_id
+        WHERE d.id = $1
+        LIMIT 1`,
+      [doctorId],
+    );
+    // A row that fails the rule (wrong type / another branch) is ignored, never
+    // printed - the doctor falls back to the standard receipt below.
+    if (isUsableConsultationTemplate(rows[0], locationId)) return rows[0];
+  }
+  return getActiveTemplate("consultation", locationId);
+}
+
+// Which doctors currently print on a given design - the input to BOTH the
+// library's "Used by N doctors" badge and the delete warning, so the two can
+// never disagree. Ordered by name for a stable message.
+export async function listDoctorsUsingTemplate(
+  templateId: string,
+  locationId: string,
+): Promise<{ id: string; name: string }[]> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    `SELECT d.id::text, d.name
+       FROM doctors d
+       JOIN bill_templates t ON t.id = d.consultation_template_id
+      WHERE d.consultation_template_id = $1 AND t.location_id = $2
+      ORDER BY d.name ASC`,
+    [templateId, locationId],
+  );
+  return rows;
+}
+
+// Every assigned doctor at a location, grouped by design id - one query for the
+// whole library page rather than one per card.
+export async function getTemplateDoctorUsage(
+  locationId: string,
+): Promise<Map<string, string[]>> {
+  const { rows } = await pool.query<{ template_id: string; name: string }>(
+    `SELECT d.consultation_template_id::text AS template_id, d.name
+       FROM doctors d
+       JOIN bill_templates t ON t.id = d.consultation_template_id
+      WHERE t.location_id = $1
+      ORDER BY d.name ASC`,
+    [locationId],
+  );
+  const usage = new Map<string, string[]>();
+  for (const row of rows) {
+    const names = usage.get(row.template_id);
+    if (names) names.push(row.name);
+    else usage.set(row.template_id, [row.name]);
+  }
+  return usage;
 }
 
 // Whether a PRINT can actually produce a receipt for this (type, location) - the
@@ -221,10 +295,17 @@ export async function duplicateTemplate(
 // Delete a design - GUARDED (plan §5): never the active one (the counter prints
 // it) and never the last of its type (the counter needs one). Nothing is
 // silently removed; callers surface `reason` to the admin.
+//
+// Doctors assigned to this design (migration 0024) do NOT block the delete - the
+// admin is warned by name in the confirm dialog first - but their pointers are
+// cleared in the SAME transaction as the delete, so the table can never hold a
+// dangling reference and those doctors fall back to the active design. The
+// cleared names come back in `unassigned` so the action can audit them and the
+// UI can say exactly who moved.
 export async function deleteTemplate(
   id: string,
   locationId: string,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true; unassigned: string[] } | { ok: false; reason: string }> {
   const row = await getTemplateById(id, locationId);
   if (!row) return { ok: false, reason: "That design no longer exists." };
   if (row.is_active) {
@@ -244,11 +325,30 @@ export async function deleteTemplate(
       reason: "This is the only design of its type. Create another before deleting this one.",
     };
   }
-  await pool.query(`DELETE FROM bill_templates WHERE id = $1 AND location_id = $2`, [
-    id,
-    locationId,
-  ]);
-  return { ok: true };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Clear the pointers FIRST (same transaction) - the FK would otherwise
+    // reject the delete outright, and doing it here keeps "who was unassigned"
+    // knowable for the audit log.
+    const { rows: unassigned } = await client.query<{ name: string }>(
+      `UPDATE doctors SET consultation_template_id = NULL
+        WHERE consultation_template_id = $1
+        RETURNING name`,
+      [id],
+    );
+    await client.query(`DELETE FROM bill_templates WHERE id = $1 AND location_id = $2`, [
+      id,
+      locationId,
+    ]);
+    await client.query("COMMIT");
+    return { ok: true, unassigned: unassigned.map((r) => r.name) };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Replace the active template: deactivate whatever is currently active and

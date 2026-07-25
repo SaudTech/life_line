@@ -2,24 +2,35 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { BedDouble, ChevronRight, Plus } from "lucide-react";
+import { BedDouble, ChevronRight, Paperclip, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatPaise } from "@/lib/money";
 import type { AdmissionListRow } from "@/lib/admissions/repository";
+import { RecordDocumentsDialog } from "@/components/record-documents-dialog";
 
 // The in-patient census (plan §5c) - currently-admitted patients, each linking to
 // its detail (running expense tally / discharge), with a tab for discharged
 // history. Keyboard-first, calm visuals, colour for status only (dev-rules §5).
 // "Admit patient" is the one prominent action.
+//
+// Discharged rows carry a paperclip: any staff member attaches/views that
+// stay's scans and case studies (documents plan) - only once discharged, i.e.
+// the record is closed. op_desk (canOperate=false) gets a read-only census:
+// no admit button and no detail links (the detail page is IP_ROLES-gated).
 export function AdmissionsManager({
   admitted,
   discharged,
+  canOperate,
+  canDeleteDocuments,
 }: {
   admitted: AdmissionListRow[];
   discharged: AdmissionListRow[];
+  canOperate: boolean;
+  canDeleteDocuments: boolean;
 }) {
   const [tab, setTab] = useState<"admitted" | "discharged">("admitted");
+  const [docTarget, setDocTarget] = useState<AdmissionListRow | null>(null);
   const rows = tab === "admitted" ? admitted : discharged;
 
   return (
@@ -31,13 +42,15 @@ export function AdmissionsManager({
             Admit patients, track their running bill, and discharge with a final invoice.
           </p>
         </div>
-        <Link
-          href="/admissions/new"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Plus className="size-4" aria-hidden />
-          Admit patient
-        </Link>
+        {canOperate ? (
+          <Link
+            href="/admissions/new"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="size-4" aria-hidden />
+            Admit patient
+          </Link>
+        ) : null}
       </div>
 
       {/* Tabs */}
@@ -75,47 +88,96 @@ export function AdmissionsManager({
         </div>
       ) : (
         <div className="grid gap-2">
-          {rows.map((a) => (
-            <Link
-              key={a.id}
-              href={`/admissions/${a.id}`}
-              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm transition-colors hover:border-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span
+          {rows.map((a) => {
+            const inner = (
+              <>
+                <span
+                  className={cn(
+                    "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                    tab === "admitted" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                  )}
+                  aria-hidden
+                >
+                  <BedDouble className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-foreground">
+                    {a.patient_name} · <span className="font-mono text-xs">{a.patient_code}</span>
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {tab === "admitted"
+                      ? `#${a.id} · Admitted ${a.admitted_label} · ${a.expense_count} expense${a.expense_count === 1 ? "" : "s"}`
+                      : `Discharged ${a.discharged_label ?? "-"}${a.bill_number ? ` · Bill #${a.bill_number}` : ""}`}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-xs text-muted-foreground">
+                    {tab === "admitted" ? "Running total" : "Bill total"}
+                  </div>
+                  <div className="text-sm font-bold text-foreground">
+                    ₹
+                    {tab === "admitted"
+                      ? formatPaise(a.running_total_paise)
+                      : formatPaise(a.bill_total_paise ?? "0")}
+                  </div>
+                </div>
+                {/* Documents: only once the stay is CLOSED (discharged). */}
+                {tab === "discharged" ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      // The row itself navigates to the detail - the paperclip must not.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDocTarget(a);
+                    }}
+                    title="Documents (scans, case studies)"
+                    aria-label={`Documents for admission ${a.id}`}
+                    className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Paperclip className="size-4" aria-hidden />
+                  </button>
+                ) : null}
+                {canOperate ? (
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                ) : null}
+              </>
+            );
+            // min-w-0: the parent grid's auto track floors at the widest row's
+            // min-content - without this the census overflows a phone viewport
+            // instead of letting the name/date lines truncate.
+            const rowClass =
+              "flex min-w-0 items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm";
+            return canOperate ? (
+              <Link
+                key={a.id}
+                href={`/admissions/${a.id}`}
                 className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                  tab === "admitted" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                  rowClass,
+                  "transition-colors hover:border-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
-                aria-hidden
               >
-                <BedDouble className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-foreground">
-                  {a.patient_name} · <span className="font-mono text-xs">{a.patient_code}</span>
-                </div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {tab === "admitted"
-                    ? `#${a.id} · Admitted ${a.admitted_label} · ${a.expense_count} expense${a.expense_count === 1 ? "" : "s"}`
-                    : `Discharged ${a.discharged_label ?? "-"}${a.bill_number ? ` · Bill #${a.bill_number}` : ""}`}
-                </div>
+                {inner}
+              </Link>
+            ) : (
+              <div key={a.id} className={rowClass}>
+                {inner}
               </div>
-              <div className="shrink-0 text-right">
-                <div className="text-xs text-muted-foreground">
-                  {tab === "admitted" ? "Running total" : "Bill total"}
-                </div>
-                <div className="text-sm font-bold text-foreground">
-                  ₹
-                  {tab === "admitted"
-                    ? formatPaise(a.running_total_paise)
-                    : formatPaise(a.bill_total_paise ?? "0")}
-                </div>
-              </div>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {docTarget ? (
+        <RecordDocumentsDialog
+          recordType="ipd"
+          recordId={docTarget.id}
+          patientName={docTarget.patient_name}
+          patientCode={docTarget.patient_code}
+          canDelete={canDeleteDocuments}
+          onClose={() => setDocTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }

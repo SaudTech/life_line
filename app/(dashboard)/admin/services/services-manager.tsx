@@ -100,7 +100,10 @@ function ServicesTable({
 }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
-      <div className="overflow-x-auto">
+      {/* [contain:layout]: a table wider than this scroller leaks its min-content
+          into the document's scroll area (Chromium quirk) - the page itself would
+          pan sideways on phones even though the table scrolls in here. */}
+      <div className="overflow-x-auto [contain:layout]">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b bg-muted/40 text-left">

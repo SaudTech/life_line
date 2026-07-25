@@ -6,6 +6,7 @@ import { clinicToday } from "@/lib/date-range";
 import type { ActionResult } from "@/lib/forms/action-result";
 import {
   getActivityCounts,
+  getDocumentCompliance,
   getMoneySummary,
   getReportContext,
   getSubjectUser,
@@ -155,12 +156,13 @@ export async function generateDailyReportAction(input: {
 
   const scope = userId === null ? "everyone" : "user";
 
-  const [activityCounts, money] = await Promise.all([
+  const [activityCounts, money, documents] = await Promise.all([
     getActivityCounts(userId, day, day, ctx.locationId),
     getMoneySummary(userId, day, day, ctx.locationId),
+    getDocumentCompliance(userId, day, day, ctx.locationId),
   ]);
 
-  const report = shapeDailyReport(activityCounts, money);
+  const report = shapeDailyReport(activityCounts, money, documents);
 
   const generatedAtLabel = new Date().toLocaleString("en-GB", {
     timeZone: "Asia/Kolkata",

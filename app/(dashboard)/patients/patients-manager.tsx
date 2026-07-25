@@ -14,8 +14,13 @@ import type { PatientRow } from "@/lib/patients/repository";
 import { PatientFormDialog } from "./patient-form-dialog";
 import { PatientCard } from "./patient-card";
 import { PatientListRowView } from "./patient-row";
+import { PatientDocumentsDialog } from "./patient-documents-dialog";
 
-type DialogState = { type: "add" } | { type: "edit"; patient: PatientRow } | null;
+type DialogState =
+  | { type: "add" }
+  | { type: "edit"; patient: PatientRow }
+  | { type: "documents"; patient: PatientRow }
+  | null;
 
 // Client shell for the Patients master list - mirrors
 // app/(dashboard)/admin/doctors/doctors-manager.tsx: the same card/list layout
@@ -166,7 +171,12 @@ export function PatientsManager({ recent, total }: { recent: PatientRow[]; total
         layout === "card" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(288px,1fr))] gap-3.5">
             {rows.map((p) => (
-              <PatientCard key={p.id} patient={p} onEdit={() => setDialog({ type: "edit", patient: p })} />
+              <PatientCard
+                key={p.id}
+                patient={p}
+                onEdit={() => setDialog({ type: "edit", patient: p })}
+                onDocuments={() => setDialog({ type: "documents", patient: p })}
+              />
             ))}
           </div>
         ) : (
@@ -176,6 +186,7 @@ export function PatientsManager({ recent, total }: { recent: PatientRow[]; total
                 key={p.id}
                 patient={p}
                 onEdit={() => setDialog({ type: "edit", patient: p })}
+                onDocuments={() => setDialog({ type: "documents", patient: p })}
               />
             ))}
           </div>
@@ -225,6 +236,9 @@ export function PatientsManager({ recent, total }: { recent: PatientRow[]; total
           onClose={() => setDialog(null)}
           onSaved={() => runSearch(query)}
         />
+      ) : null}
+      {dialog?.type === "documents" ? (
+        <PatientDocumentsDialog patient={dialog.patient} onClose={() => setDialog(null)} />
       ) : null}
     </div>
   );

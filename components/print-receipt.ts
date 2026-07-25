@@ -1,6 +1,7 @@
 "use client";
 
 import { logReceiptPrintedAction } from "@/lib/printing/actions";
+import { setPrintJobName } from "@/components/print-job-name";
 
 // The counter's ONE print entry point (print plan §4) - opens the receipt PDF
 // route in a hidden iframe and calls the browser's native print dialog on it.
@@ -45,6 +46,11 @@ export function printReceipt(
 
   iframe.onload = () => {
     handled = true;
+    // Names the file when the operator saves instead of printing ("Save as
+    // PDF" pre-fills from the page title, matching the route's own filename).
+    const restoreTitle = setPrintJobName(
+      copy === "duplicate" ? `receipt-${billNumber}-duplicate` : `receipt-${billNumber}`,
+    );
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
@@ -52,6 +58,8 @@ export function printReceipt(
       // Some browsers block scripted printing across the iframe boundary -
       // fall back to a normal tab the operator can print from directly.
       window.open(url, "_blank");
+    } finally {
+      restoreTitle();
     }
     cleanup();
   };

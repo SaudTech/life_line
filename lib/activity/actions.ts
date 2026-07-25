@@ -91,6 +91,10 @@ export const ACTIVITY = {
   "receipt.template_deleted":    { label: "Receipt design deleted",    tone: "danger" },
   "receipt.template_reset": { label: "Receipt template reset to default", tone: "accent" },
 
+  // ── Patient documents (scans / case studies on OPD & IPD records) ─────
+  "document.upload":       { label: "Documents uploaded",       tone: "success" },
+  "document.delete":       { label: "Document deleted",         tone: "danger"  },
+
   // ── Suggestions ────────────────────────────────────────────────────────
   "suggestion.create":     { label: "Suggestion submitted",     tone: "accent"  },
 

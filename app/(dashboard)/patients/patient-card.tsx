@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil } from "lucide-react";
+import { Paperclip, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -72,6 +72,7 @@ export function GenderPill({ gender }: { gender: string | null }) {
 export interface PatientCardProps {
   patient: PatientRow;
   onEdit: () => void;
+  onDocuments: () => void;
 }
 
 function PhoneButton({ phone }: { phone: string | null }) {
@@ -98,9 +99,18 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function Actions({ onEdit }: { onEdit: () => void }) {
+export function Actions({ onEdit, onDocuments }: { onEdit: () => void; onDocuments: () => void }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end gap-1.5">
+      {/* Attached scans / case studies across this patient's OPD & IPD records. */}
+      <button
+        type="button"
+        onClick={onDocuments}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Paperclip className="size-3.5" aria-hidden />
+        Documents
+      </button>
       <button
         type="button"
         onClick={onEdit}
@@ -113,7 +123,7 @@ export function Actions({ onEdit }: { onEdit: () => void }) {
   );
 }
 
-export function PatientCard({ patient, onEdit }: PatientCardProps) {
+export function PatientCard({ patient, onEdit, onDocuments }: PatientCardProps) {
   return (
     <div className={cn("flex h-full flex-col gap-3 rounded-md border bg-card p-4 transition-shadow hover:shadow-sm")}>
       <div className="flex flex-1 flex-col gap-3">
@@ -142,7 +152,7 @@ export function PatientCard({ patient, onEdit }: PatientCardProps) {
       </div>
 
       <div className="mt-auto border-t pt-3">
-        <Actions onEdit={onEdit} />
+        <Actions onEdit={onEdit} onDocuments={onDocuments} />
       </div>
     </div>
   );

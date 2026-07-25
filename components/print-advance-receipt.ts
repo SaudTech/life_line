@@ -1,6 +1,7 @@
 "use client";
 
 import { logAdvancePrintedAction } from "@/lib/admissions/actions";
+import { setPrintJobName } from "@/components/print-job-name";
 
 // The counter's print entry point for the A4 advance-deposit receipt (plan §5b) -
 // opens the receipt PDF route in a hidden iframe and calls the browser's native
@@ -23,11 +24,17 @@ export function printAdvanceReceipt(admissionId: string): void {
   let handled = false;
   iframe.onload = () => {
     handled = true;
+    // Names the file when the operator saves instead of printing - the
+    // admission id doubles as the receipt reference, matching the route's own
+    // Content-Disposition filename.
+    const restoreTitle = setPrintJobName(`advance-receipt-${admissionId}`);
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } catch {
       window.open(url, "_blank");
+    } finally {
+      restoreTitle();
     }
     setTimeout(() => iframe.remove(), 60_000);
   };

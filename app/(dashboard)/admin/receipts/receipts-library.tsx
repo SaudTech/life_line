@@ -4,7 +4,17 @@ import { useMemo, useState, useTransition } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Eye, FileText, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Copy,
+  Eye,
+  FileText,
+  Pencil,
+  Plus,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { Template } from "@pdfme/common";
 
@@ -58,10 +68,21 @@ export interface DesignRow {
   bill_type: BillType;
   is_active: boolean;
   updatedLabel: string;
+  // Doctors whose consultations print on THIS design (migration 0024), by name.
+  // Empty for every design nobody has been assigned to.
+  doctors: string[];
 }
 
 type RenameState = { id: string; name: string } | null;
-type DeleteState = { id: string; name: string } | null;
+type DeleteState = { id: string; name: string; doctors: string[] } | null;
+
+// "Dr. Rao", "Dr. Rao and Dr. Iyer", "Dr. Rao, Dr. Iyer and 2 others" - a warning
+// has to name who is affected; a bare count makes the admin go and look.
+function doctorList(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
+  const rest = names.length - 2;
+  return `${names[0]}, ${names[1]} and ${rest} other${rest === 1 ? "" : "s"}`;
+}
 type PreviewState = { type: BillType; template: Template } | null;
 
 export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] }) {
@@ -150,7 +171,7 @@ export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] 
   // API runs in the background. If the delete fails (e.g. it became the active/
   // last design), the card slides back in and the error is shown - nothing was
   // actually lost.
-  function handleConfirmDelete(id: string) {
+  function handleConfirmDelete(id: string, doctors: string[]) {
     setDel(null); // close the dialog immediately - don't wait on the API
     mutateWithTransition(() => setRemovedIds((prev) => new Set(prev).add(id)));
     void deleteTemplateAction({ id }).then((res) => {
@@ -165,7 +186,17 @@ export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] 
         toast.error(res.formError ?? "Could not delete this design.");
         return;
       }
-      toast.success("Design deleted.");
+      // Say who moved - the admin was warned before confirming, and this is the
+      // receipt that it actually happened. The server's list is authoritative
+      // (it may differ from the page's if another admin reassigned meanwhile).
+      const moved = res.data?.unassigned?.length ? res.data.unassigned : doctors;
+      toast.success(
+        moved.length
+          ? `Design deleted. ${doctorList(moved)} now print${
+              moved.length === 1 ? "s" : ""
+            } the default consultation design.`
+          : "Design deleted.",
+      );
       router.refresh();
     });
   }
@@ -245,7 +276,9 @@ export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] 
                       onDuplicate={() => duplicate(row.id)}
                       onRename={() => setRename({ id: row.id, name: row.name })}
                       onPreview={() => openPreview(row)}
-                      onDelete={() => setDel({ id: row.id, name: row.name })}
+                      onDelete={() =>
+                        setDel({ id: row.id, name: row.name, doctors: row.doctors })
+                      }
                     />
                   ))}
                 </div>
@@ -270,7 +303,7 @@ export function ReceiptsLibrary({ designs: allDesigns }: { designs: DesignRow[] 
         <DeleteDialog
           state={del}
           onClose={() => setDel(null)}
-          onConfirm={() => handleConfirmDelete(del.id)}
+          onConfirm={() => handleConfirmDelete(del.id, del.doctors)}
         />
       ) : null}
 
@@ -334,6 +367,13 @@ function DesignCard({
           <div className="text-xs font-medium text-muted-foreground">
             Updated {row.updatedLabel}
           </div>
+          {/* Who prints on this design (migration 0024) - shown on the card so
+              its use is visible BEFORE the admin reaches for Delete. */}
+          {row.doctors.length ? (
+            <div className="mt-0.5 truncate text-xs font-medium text-amber-700">
+              Used by {doctorList(row.doctors)}
+            </div>
+          ) : null}
         </div>
         {row.is_active ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary">
@@ -454,23 +494,47 @@ function DeleteDialog({
   onClose,
   onConfirm,
 }: {
-  state: { id: string; name: string };
+  state: { id: string; name: string; doctors: string[] };
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const inUse = state.doctors.length > 0;
   return (
     <Dialog open onOpenChange={(o) => (o ? null : onClose())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete design?</DialogTitle>
+          <DialogTitle>{inUse ? "Delete a design in use?" : "Delete design?"}</DialogTitle>
           <DialogDescription>
             <span className="font-medium text-foreground">{state.name}</span> will be permanently
             removed. This can&apos;t be undone.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Deleting a design that doctors are assigned to is allowed, but never
+            without saying who it affects and what happens to them - they fall
+            back to the location's active consultation design, and the change is
+            recorded in the activity log. */}
+        {inUse ? (
+          <div className="flex items-start gap-2.5 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-semibold">
+                {state.doctors.length === 1
+                  ? "1 doctor prints on this design"
+                  : `${state.doctors.length} doctors print on this design`}
+              </p>
+              <p className="mt-1 font-medium">{state.doctors.join(", ")}</p>
+              <p className="mt-1.5">
+                Their consultations will print the default consultation design instead. Assign
+                them another design first if that&apos;s not what you want.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <DialogFooter className="mt-6 flex-row justify-start gap-2">
           <Button type="button" variant="destructive" onClick={onConfirm}>
-            Delete
+            {inUse ? "Delete anyway" : "Delete"}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

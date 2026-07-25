@@ -28,12 +28,23 @@ type DialogState = { type: "add" | "edit"; doctorId: string | null } | null;
 // fully preloaded, so this filters in memory rather than round-tripping to the
 // server - unlike the paginated history lists). Mutations run in the server
 // actions, which revalidate the page so fresh `doctors` flow back as props.
+// A consultation receipt design a doctor can be assigned to (migration 0024),
+// pre-shaped by the server page. `isActive` marks the location's default - the
+// design every doctor prints on unless given one of their own.
+export interface ConsultationDesign {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 export function DoctorsManager({
   doctors,
   departments,
+  consultationDesigns,
 }: {
   doctors: DoctorListRow[];
   departments: DepartmentRow[];
+  consultationDesigns: ConsultationDesign[];
 }) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -227,6 +238,7 @@ export function DoctorsManager({
           mode="add"
           doctor={null}
           departments={departments}
+          consultationDesigns={consultationDesigns}
           onClose={() => setDialog(null)}
         />
       ) : null}
@@ -235,6 +247,7 @@ export function DoctorsManager({
           mode="edit"
           doctor={activeDoctor}
           departments={departments}
+          consultationDesigns={consultationDesigns}
           onClose={() => setDialog(null)}
         />
       ) : null}

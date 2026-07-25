@@ -179,8 +179,10 @@ export function ProceduresList({
         />
 
         {/* Min / Max / service kept together so the service dropdown never wraps
-            away from the amount range - the group wraps as one unit. */}
-        <div className="flex items-center gap-2.5">
+            away from the amount range - the group wraps as one unit. flex-wrap is
+            the phone escape hatch: below ~380px the group itself can't fit on one
+            line, and wrapping inside it beats overflowing the page. */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <Input
             type="number"
             min="0"
@@ -235,7 +237,10 @@ export function ProceduresList({
 
       {rows.length > 0 ? (
         <div className="overflow-hidden rounded-xl border bg-card">
-          <div className="overflow-x-auto">
+          {/* [contain:layout]: a table wider than this scroller leaks its min-content
+              into the document's scroll area (Chromium quirk) - the page itself would
+              pan sideways on phones even though the table scrolls in here. */}
+          <div className="overflow-x-auto [contain:layout]">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left">

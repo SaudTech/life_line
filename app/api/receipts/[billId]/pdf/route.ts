@@ -3,7 +3,7 @@ import { generate } from "@pdfme/generator";
 import { loadPdfFonts, withRenderableFonts } from "@/lib/printing/fonts-loader";
 import { requireSession } from "@/lib/auth/dal";
 import { getBillDocument } from "@/lib/printing/bill-document-repository";
-import { getActiveTemplate } from "@/lib/printing/repository";
+import { getActiveTemplate, getConsultationTemplate } from "@/lib/printing/repository";
 import { billDocumentToInputs } from "@/lib/printing/fields";
 import { PDF_PLUGINS } from "@/lib/printing/pdf-plugins";
 
@@ -45,9 +45,19 @@ export async function GET(
   // branch B's layout. getActiveTemplate throws for a type with no active row AND
   // no default; return 409 (not a broken/empty PDF) so this route stays the
   // authority even if a Print button ever leaks through (print-updates plan §1b).
+  //
+  // A CONSULTATION additionally honours the doctor's own assigned design when
+  // they have one (migration 0024); getConsultationTemplate falls back to the
+  // active design for every other case, so this branch can never print nothing.
+  // Resolution is live, not snapshotted - a reprint uses the doctor's design as
+  // it stands today, the same way editing the active design has always affected
+  // reprints.
   let tpl;
   try {
-    tpl = await getActiveTemplate(doc.type, doc.locationId);
+    tpl =
+      doc.type === "consultation"
+        ? await getConsultationTemplate(doc.doctorId, doc.locationId)
+        : await getActiveTemplate(doc.type, doc.locationId);
   } catch {
     return new NextResponse("No receipt design for this document type.", { status: 409 });
   }

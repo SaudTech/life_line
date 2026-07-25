@@ -110,11 +110,14 @@ export async function getBillDocument(billId: string): Promise<BillDocumentUnion
 
   if (core.type === "consultation") {
     const { rows: consultRows } = await pool.query<{
+      doctor_id: string;
       doctor_name: string;
       reason: string | null;
       valid_until_text: string;
     }>(
-      `SELECT d.name AS doctor_name, c.reason, to_char(c.valid_until, 'DD Mon YYYY') AS valid_until_text
+      // doctor_id is not a printable field - it is carried so the print route
+      // can pick this doctor's own consultation design (migration 0024).
+      `SELECT d.id::text AS doctor_id, d.name AS doctor_name, c.reason, to_char(c.valid_until, 'DD Mon YYYY') AS valid_until_text
          FROM consultations c
          JOIN doctors d ON d.id = c.doctor_id
         WHERE c.id = $1`,
@@ -125,6 +128,7 @@ export async function getBillDocument(billId: string): Promise<BillDocumentUnion
       throw new Error(`Consultation for bill ${billId} not found`);
     }
     return buildConsultationDocument(coreInput, {
+      doctorId: consultation.doctor_id,
       doctorName: consultation.doctor_name,
       reason: consultation.reason,
       validUntilText: consultation.valid_until_text,

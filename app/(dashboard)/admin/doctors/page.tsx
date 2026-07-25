@@ -3,7 +3,8 @@ import { requireAdmin } from "@/lib/auth/dal";
 import { listDoctors } from "@/lib/doctors/repository";
 import { listDepartments } from "@/lib/departments/repository";
 import { getUserLocationId } from "@/lib/users/repository";
-import { DoctorsManager } from "./doctors-manager";
+import { getActiveTemplate, listTemplates } from "@/lib/printing/repository";
+import { DoctorsManager, type ConsultationDesign } from "./doctors-manager";
 
 export const metadata: Metadata = {
   title: "Doctors - Life Line Hospital",
@@ -19,10 +20,30 @@ export const metadata: Metadata = {
 export default async function DoctorsPage() {
   const s = await requireAdmin();
   const locationId = await getUserLocationId(s.sub);
-  const [doctors, departments] = await Promise.all([
+
+  // Guarantee the default consultation design exists before listing, so the
+  // form's "Default" option can name it on a fresh install (getActiveTemplate
+  // lazily seeds the checked-in default the first time it's read).
+  if (locationId) await getActiveTemplate("consultation", locationId);
+
+  const [doctors, departments, templates] = await Promise.all([
     listDoctors(),
     locationId ? listDepartments(locationId) : Promise.resolve([]),
+    locationId ? listTemplates(locationId) : Promise.resolve([]),
   ]);
 
-  return <DoctorsManager doctors={doctors} departments={departments} />;
+  // Only consultation designs can be assigned to a doctor (migration 0024) -
+  // the receipt printed for a consultation is the only one that varies by
+  // doctor. The active one is flagged so the form can label it "Default".
+  const consultationDesigns: ConsultationDesign[] = templates
+    .filter((t) => t.bill_type === "consultation")
+    .map((t) => ({ id: t.id, name: t.name, isActive: t.is_active }));
+
+  return (
+    <DoctorsManager
+      doctors={doctors}
+      departments={departments}
+      consultationDesigns={consultationDesigns}
+    />
+  );
 }

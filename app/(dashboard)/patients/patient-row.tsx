@@ -8,7 +8,15 @@ import { Actions, GenderPill, formatAdded, formatPhone, copyPhone } from "./pati
 // `ml-auto`, so the row's columns - including the Edit action - never drift from
 // row to row regardless of content length.
 
-export function PatientListRowView({ patient, onEdit }: { patient: PatientRow; onEdit: () => void }) {
+export function PatientListRowView({
+  patient,
+  onEdit,
+  onDocuments,
+}: {
+  patient: PatientRow;
+  onEdit: () => void;
+  onDocuments: () => void;
+}) {
   return (
     <div className="flex flex-nowrap items-center gap-4 overflow-x-auto bg-card px-4 py-3 transition-colors hover:bg-primary/5">
       <span
@@ -65,7 +73,7 @@ export function PatientListRowView({ patient, onEdit }: { patient: PatientRow; o
       </div>
 
       <div className="ml-auto shrink-0">
-        <Actions onEdit={onEdit} />
+        <Actions onEdit={onEdit} onDocuments={onDocuments} />
       </div>
     </div>
   );

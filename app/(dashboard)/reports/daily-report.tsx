@@ -24,7 +24,11 @@ import {
   type DailyReportResult,
 } from "@/lib/reports/actions";
 import type { ReportableStaff } from "@/lib/reports/repository";
-import type { BillTypeValue, DoctorShareRow } from "@/lib/reports/summary";
+import type {
+  BillTypeValue,
+  DocumentComplianceLine,
+  DoctorShareRow,
+} from "@/lib/reports/summary";
 import { PaymentModeDonut } from "./charts";
 
 // The daily report screen (plan §5). Display + a date/subject control only - every
@@ -189,6 +193,70 @@ function shareRate(d: DoctorShareRow): string {
   return d.shareType === "flat" ? `₹${formatPaise(d.shareFlatPaise)}` : `${d.sharePercentage}%`;
 }
 
+// How many pending records are listed by name before collapsing to "+N more" -
+// keeps a badly-behind day from turning the sheet into pages of chips while
+// still giving enough to start working through.
+const MAX_PENDING_LISTED = 24;
+
+// One record-kind block of the Document uploads section: the "90 of 100 with
+// documents" tally, then - when something is owed - the exact records still
+// pending as compact chips (record # + patient), so the staff member can go
+// finish the work instead of hunting for which ones are missing. Amber = work
+// outstanding, green = complete; colour is for status only (§5).
+function DocumentComplianceRows({
+  label,
+  line,
+}: {
+  label: string;
+  line: DocumentComplianceLine;
+}) {
+  const pendingCount = line.pending.length;
+  const shown = line.pending.slice(0, MAX_PENDING_LISTED);
+  const more = pendingCount - shown.length;
+  return (
+    <>
+      <tr className={cn(pendingCount === 0 && "border-b border-border/70")}>
+        <td className="py-2 pr-3 text-sm font-medium text-foreground">{label}</td>
+        <td className="w-48 py-2 pl-3 text-right text-sm tabular-nums">
+          <span className="font-semibold text-foreground">
+            {line.withDocuments} of {line.total}
+          </span>
+          <span className="text-muted-foreground"> with documents</span>
+        </td>
+        <td className="w-28 py-2 pl-3 text-right text-sm font-semibold tabular-nums">
+          {pendingCount > 0 ? (
+            <span className="text-amber-600">{pendingCount} pending</span>
+          ) : (
+            <span className="text-green-600">Complete</span>
+          )}
+        </td>
+      </tr>
+      {pendingCount > 0 ? (
+        <tr className="border-b border-border/70">
+          <td colSpan={3} className="pb-2.5 pt-0.5">
+            <div className="flex flex-wrap gap-1.5">
+              {shown.map((p) => (
+                <span
+                  key={p.recordId}
+                  className="rounded border border-amber-600/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400"
+                >
+                  #{p.recordId} · {p.patientName}{" "}
+                  <span className="font-mono">{p.patientCode}</span>
+                </span>
+              ))}
+              {more > 0 ? (
+                <span className="self-center text-[11px] font-medium text-muted-foreground">
+                  +{more} more
+                </span>
+              ) : null}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
 // A section subtotal: a single rule above, bolder type. Ledger convention.
 function Subtotal({ label, count, paise }: { label: string; count?: number; paise: number }) {
   return (
@@ -274,6 +342,29 @@ export function DailyReportView({
     })),
   ];
 
+  // The pending-uploads callout, phrased for the subject: "3 consultations and
+  // 1 IP discharge". Counts come straight off the shaped report - never re-derived.
+  const docs = report.documents;
+  const pendingParts: string[] = [];
+  if (docs.opd.pending.length > 0) {
+    pendingParts.push(
+      `${docs.opd.pending.length} ${docs.opd.pending.length === 1 ? "consultation" : "consultations"}`,
+    );
+  }
+  if (docs.ipd.pending.length > 0) {
+    pendingParts.push(
+      `${docs.ipd.pending.length} ${docs.ipd.pending.length === 1 ? "IP discharge" : "IP discharges"}`,
+    );
+  }
+  const pendingCallout =
+    pendingParts.length === 0
+      ? ""
+      : everyone
+        ? `Pending across the hospital: documents still to be uploaded for ${pendingParts.join(" and ")}.`
+        : isSelf
+          ? `Pending work: you still need to upload documents for ${pendingParts.join(" and ")}.`
+          : `Pending work: ${subjectName} still needs to upload documents for ${pendingParts.join(" and ")}.`;
+
   // Refunds are NOT here any more: they are a subtracted line in the money-in working
   // below, because they are real cash leaving the drawer, not a footnote.
   const hasAdjustments =
@@ -302,7 +393,10 @@ export function DailyReportView({
           </Link>
         ) : null}
 
-        <div className="ml-auto flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+        {/* flex-wrap, not overflow-x-auto: on a phone the old sideways scroll
+            clipped the day picker off the left edge; wrapping keeps every
+            control visible. Desktop widths never wrap - nothing changes there. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {pending ? (
             <span className="inline-flex items-center gap-1.5 pr-1 text-xs font-medium text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" aria-hidden />
@@ -652,6 +746,38 @@ export function DailyReportView({
                   </table>
                 )}
               </Section>
+
+              {/* Document uploads - pending WORK, not money. Every consultation and
+                  IP discharge is supposed to get its scans uploaded (the paperclip on
+                  the OPD/IPD lists); this section is where a shortfall is called out
+                  per subject, with the exact records still owing. Checked live, so
+                  yesterday's sheet cleans itself up as the uploads come in. Only
+                  rendered when the day actually produced records of a kind - an
+                  op_desk sheet never shows an empty IP row. */}
+              {docs.opd.total > 0 || docs.ipd.total > 0 ? (
+                <Section
+                  title="Document uploads"
+                  note="Scans and case studies for the day's records - checked live, so later uploads clear from here."
+                >
+                  <table className="w-full border-collapse">
+                    <tbody>
+                      {docs.opd.total > 0 ? (
+                        <DocumentComplianceRows label="OPD consultations" line={docs.opd} />
+                      ) : null}
+                      {docs.ipd.total > 0 ? (
+                        <DocumentComplianceRows label="IP discharges" line={docs.ipd} />
+                      ) : null}
+                    </tbody>
+                  </table>
+                  {docs.pendingTotal > 0 ? (
+                    <p className="mt-2 text-xs font-semibold text-amber-600">{pendingCallout}</p>
+                  ) : (
+                    <p className="mt-2 text-xs font-medium text-green-600">
+                      All of this day&apos;s records have their documents uploaded.
+                    </p>
+                  )}
+                </Section>
+              ) : null}
             </>
           )}
         </div>

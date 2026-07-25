@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth/dal";
 import { getUserLocationId } from "@/lib/users/repository";
-import { getActiveTemplate, listTemplates } from "@/lib/printing/repository";
+import {
+  getActiveTemplate,
+  getTemplateDoctorUsage,
+  listTemplates,
+} from "@/lib/printing/repository";
 import { relativeTime } from "@/lib/admin/activity";
 import { ReceiptsLibrary, type DesignRow } from "./receipts-library";
 
@@ -29,7 +33,13 @@ export default async function ReceiptsPage() {
     getActiveTemplate("procedure", locationId),
   ]);
 
-  const templates = await listTemplates(locationId);
+  // Designs, plus which doctors are assigned to each (migration 0024) - the
+  // usage is read here, once, for the whole grid: it drives both the card's
+  // "Used by ..." line and the warning shown before a delete.
+  const [templates, usage] = await Promise.all([
+    listTemplates(locationId),
+    getTemplateDoctorUsage(locationId),
+  ]);
 
   // Pre-format "Updated ..." on the server with a single server `now`, the same
   // way the admin dashboard formats its activity rows. A client-computed `now`
@@ -41,6 +51,7 @@ export default async function ReceiptsPage() {
     bill_type: t.bill_type,
     is_active: t.is_active,
     updatedLabel: relativeTime(new Date(t.updated_at), now),
+    doctors: usage.get(t.id) ?? [],
   }));
 
   return <ReceiptsLibrary designs={designs} />;

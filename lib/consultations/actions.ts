@@ -47,6 +47,11 @@ import {
 
 const CONSULT_ROLES = ["admin", "op_ip_desk", "supervisor"] as const;
 
+// The history LIST is readable by every staff role (documents plan: any desk
+// opens it to attach/view scans); starting/billing consultations stays
+// CONSULT_ROLES-only.
+const CONSULT_LIST_ROLES = ["admin", "op_ip_desk", "supervisor", "op_desk"] as const;
+
 const PANEL_PATH = "/consultations";
 
 // A patient row for the picker, enriched with the last visit day.
@@ -76,7 +81,7 @@ export async function lookupPatientsAction(
 export async function listConsultationsAction(
   input: unknown,
 ): Promise<ActionResult<ConsultationListRow[]>> {
-  await requireRole(CONSULT_ROLES);
+  await requireRole(CONSULT_LIST_ROLES);
   const parsed = consultationFiltersSchema.safeParse(input ?? {});
   if (!parsed.success) {
     return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };

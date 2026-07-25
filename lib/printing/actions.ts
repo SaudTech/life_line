@@ -310,8 +310,12 @@ export async function duplicateTemplateAction(
 }
 
 // Delete a design - guarded in the repository (never the active one, never the
-// last of a type); the guard's reason is surfaced to the admin verbatim.
-export async function deleteTemplateAction(input: unknown): Promise<ActionResult> {
+// last of a type); the guard's reason is surfaced to the admin verbatim. Doctors
+// assigned to it (migration 0024) are cleared in the same transaction and
+// returned, so the UI can confirm exactly who fell back to the active design.
+export async function deleteTemplateAction(
+  input: unknown,
+): Promise<ActionResult<{ unassigned: string[] }>> {
   const s = await requireAdmin();
   const parsed = templateIdOnlySchema.safeParse(input);
   if (!parsed.success) return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
@@ -331,10 +335,18 @@ export async function deleteTemplateAction(input: unknown): Promise<ActionResult
     entity: "bill_template",
     targetId: parsed.data.id,
     locationId: loc.locationId,
-    details: { bill_type: existing.bill_type, name: existing.name },
+    details: {
+      bill_type: existing.bill_type,
+      name: existing.name,
+      // Doctors who were printing on this design and are now back on the
+      // location's active one (migration 0024) - recorded by name so the change
+      // is traceable later, never silent.
+      unassigned_doctors: result.unassigned,
+    },
   });
   revalidatePath(PANEL_PATH);
-  return { ok: true };
+  revalidatePath("/admin/doctors");
+  return { ok: true, data: { unassigned: result.unassigned } };
 }
 
 export async function resetTemplateAction(

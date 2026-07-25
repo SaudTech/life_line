@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   shapeDailyReport,
   emptyMoneyRaw,
+  emptyDocumentComplianceRaw,
   BILL_TYPES,
   type DoctorShareRow,
   type MoneyRaw,
+  type PendingDocumentRow,
 } from "./summary";
 import { PAYMENT_MODES } from "@/lib/consultations/schema";
 
@@ -272,5 +274,57 @@ describe("shapeDailyReport money-in reconciliation", () => {
     const r = shapeDailyReport([], emptyMoneyRaw());
     expect(r.moneyInTotalPaise).toBe(0);
     expect(r.refunds).toEqual({ count: 0, totalPaise: 0 });
+  });
+});
+
+// Document upload compliance: the report calls out the records the subject
+// produced that STILL have no scanned documents - "100 consultations, 3 IP
+// discharges, but only 90 + 2 uploaded → 10 consultations and 1 IP pending".
+// The shaper's only arithmetic here is the withDocuments remainder; totals and
+// pending lists come from the repository as-is.
+describe("shapeDailyReport document uploads", () => {
+  const pending = (recordId: string): PendingDocumentRow => ({
+    recordId,
+    patientName: "Asha Devi",
+    patientCode: "LL000123",
+  });
+
+  it("reports withDocuments as total minus pending, per kind, plus the combined pending count", () => {
+    // The stated case, scaled down: 5 consultations / 2 uploaded, 3 IP / 2 uploaded.
+    const r = shapeDailyReport([], emptyMoneyRaw(), {
+      opd: { total: 5, pending: [pending("11"), pending("12"), pending("13")] },
+      ipd: { total: 3, pending: [pending("7")] },
+    });
+
+    expect(r.documents.opd).toMatchObject({ total: 5, withDocuments: 2 });
+    expect(r.documents.opd.pending.map((p) => p.recordId)).toEqual(["11", "12", "13"]);
+    expect(r.documents.ipd).toMatchObject({ total: 3, withDocuments: 2 });
+    expect(r.documents.pendingTotal).toBe(4);
+  });
+
+  it("a fully-uploaded day has zero pending everywhere", () => {
+    const r = shapeDailyReport([], emptyMoneyRaw(), {
+      opd: { total: 4, pending: [] },
+      ipd: { total: 1, pending: [] },
+    });
+
+    expect(r.documents.opd).toEqual({ total: 4, withDocuments: 4, pending: [] });
+    expect(r.documents.ipd).toEqual({ total: 1, withDocuments: 1, pending: [] });
+    expect(r.documents.pendingTotal).toBe(0);
+  });
+
+  it("callers that pass no compliance block get an all-zero one (the PDF path)", () => {
+    const r = shapeDailyReport([], emptyMoneyRaw());
+    expect(r.documents.opd).toEqual({ total: 0, withDocuments: 0, pending: [] });
+    expect(r.documents.ipd).toEqual({ total: 0, withDocuments: 0, pending: [] });
+    expect(r.documents.pendingTotal).toBe(0);
+  });
+
+  it("clamps withDocuments at zero if pending ever exceeds total (query race)", () => {
+    const r = shapeDailyReport([], emptyMoneyRaw(), {
+      ...emptyDocumentComplianceRaw(),
+      opd: { total: 1, pending: [pending("1"), pending("2")] },
+    });
+    expect(r.documents.opd.withDocuments).toBe(0); // never "-1 with documents"
   });
 });

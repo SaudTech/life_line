@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import type { ActionResult } from "@/lib/forms/action-result";
 import type { DoctorListRow } from "@/lib/doctors/repository";
 import type { DepartmentRow } from "@/lib/departments/repository";
+import type { ConsultationDesign } from "./doctors-manager";
 
 // Dropdown choices for the app-wide <Combobox>, mirroring lib/users/schema's
 // ROLE_OPTIONS pattern.
@@ -269,6 +270,52 @@ function DoctorShareField<T extends FieldValues>({
   );
 }
 
+// Which consultation receipt design this doctor's bills print on (migration
+// 0024). "" is the default - the design marked Active in the receipt library -
+// and is what a doctor keeps unless the hospital wants their own letterhead.
+// Only CONSULTATION designs are offered; the server action re-checks that the
+// chosen id really is one, at this location.
+function ConsultationDesignField<T extends FieldValues>({
+  control,
+  name,
+  invalid,
+  designs,
+}: {
+  control: import("react-hook-form").Control<T>;
+  name: Path<T>;
+  invalid: boolean;
+  designs: ConsultationDesign[];
+}) {
+  const activeName = designs.find((d) => d.isActive)?.name;
+  const options: ComboboxOption[] = [
+    { value: "", label: activeName ? `Default (${activeName})` : "Default" },
+    ...designs.filter((d) => !d.isActive).map((d) => ({ value: d.id, label: d.name })),
+  ];
+  return (
+    <Controller
+      control={control}
+      name={name}
+      render={({ field }) => {
+        // A design that has since been deleted would leave the trigger blank -
+        // fall back to the Default entry so the control always reads truthfully
+        // (that IS what such a doctor now prints; see deleteTemplate).
+        const value = options.some((o) => o.value === field.value) ? field.value : "";
+        return (
+          <Combobox
+            options={options}
+            value={value}
+            onChange={field.onChange}
+            onBlur={field.onBlur}
+            invalid={invalid}
+            placeholder="Default"
+            ariaLabel="Consultation print design"
+          />
+        );
+      }}
+    />
+  );
+}
+
 // The form fields shared by add + edit, kept in one place so the two forms
 // never drift. Generic over the values type; `errors` is the RHF error map.
 function DoctorFields<T extends FieldValues>({
@@ -276,12 +323,14 @@ function DoctorFields<T extends FieldValues>({
   control,
   errors,
   departments,
+  consultationDesigns,
   idPrefix,
 }: {
   register: import("react-hook-form").UseFormRegister<T>;
   control: import("react-hook-form").Control<T>;
   errors: import("react-hook-form").FieldErrors<T>;
   departments: DepartmentRow[];
+  consultationDesigns: ConsultationDesign[];
   idPrefix: string;
 }) {
   // Cast the fixed field names to Path<T> - both schemas share these keys.
@@ -402,6 +451,21 @@ function DoctorFields<T extends FieldValues>({
           </p>
         </Field>
       </div>
+
+      <Field data-invalid={errors.consultationTemplateId ? true : undefined}>
+        <FieldLabel htmlFor={`${idPrefix}-design`}>Consultation print design</FieldLabel>
+        <ConsultationDesignField
+          control={control}
+          name={"consultationTemplateId" as Path<T>}
+          invalid={errors.consultationTemplateId ? true : false}
+          designs={consultationDesigns}
+        />
+        <FieldError errors={[errors.consultationTemplateId as never]} />
+        <p className="text-xs text-muted-foreground">
+          Receipt layout used for this doctor&apos;s consultations. Leave on Default unless
+          they need their own. Manage layouts under Admin → Receipt designs.
+        </p>
+      </Field>
     </FieldGroup>
   );
 }
@@ -410,23 +474,42 @@ export function DoctorFormDialog({
   mode,
   doctor,
   departments,
+  consultationDesigns,
   onClose,
 }: {
   mode: "add" | "edit";
   doctor: DoctorListRow | null;
   departments: DepartmentRow[];
+  consultationDesigns: ConsultationDesign[];
   onClose: () => void;
 }) {
-  if (mode === "add") return <AddForm departments={departments} onClose={onClose} />;
-  if (doctor) return <EditForm doctor={doctor} departments={departments} onClose={onClose} />;
+  if (mode === "add")
+    return (
+      <AddForm
+        departments={departments}
+        consultationDesigns={consultationDesigns}
+        onClose={onClose}
+      />
+    );
+  if (doctor)
+    return (
+      <EditForm
+        doctor={doctor}
+        departments={departments}
+        consultationDesigns={consultationDesigns}
+        onClose={onClose}
+      />
+    );
   return null;
 }
 
 function AddForm({
   departments,
+  consultationDesigns,
   onClose,
 }: {
   departments: DepartmentRow[];
+  consultationDesigns: ConsultationDesign[];
   onClose: () => void;
 }) {
   // Input/output generics: z.coerce.number() means the FORM value (input) is
@@ -445,6 +528,8 @@ function AddForm({
       revisitValidityDays: 0,
       doctorShareType: "percentage",
       doctorShareValue: "0",
+      // "" = the location's active consultation design (migration 0024).
+      consultationTemplateId: "",
     },
   });
   const {
@@ -475,6 +560,7 @@ function AddForm({
           control={control}
           errors={errors}
           departments={departments}
+          consultationDesigns={consultationDesigns}
           idPrefix="ad"
         />
         {errors.root ? <FieldError errors={[errors.root]} /> : null}
@@ -494,10 +580,12 @@ function AddForm({
 function EditForm({
   doctor,
   departments,
+  consultationDesigns,
   onClose,
 }: {
   doctor: DoctorListRow;
   departments: DepartmentRow[];
+  consultationDesigns: ConsultationDesign[];
   onClose: () => void;
 }) {
   const form = useForm<z.input<typeof updateDoctorSchema>, unknown, UpdateDoctorValues>({
@@ -518,6 +606,8 @@ function EditForm({
         doctor.share_type === "flat"
           ? formatPaise(doctor.share_flat_paise ?? 0).replace(/,/g, "")
           : String(doctor.share_percentage ?? 0),
+      // NULL (no custom design) prefills as "" - the Default entry.
+      consultationTemplateId: doctor.consultation_template_id ?? "",
     },
   });
   const {
@@ -539,7 +629,7 @@ function EditForm({
   return (
     <DialogShell
       title="Edit doctor"
-      description="Update name, department, phone, status, fee and revisit validity."
+      description="Update name, department, phone, status, fee, revisit validity and print design."
       onClose={onClose}
     >
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -548,6 +638,7 @@ function EditForm({
           control={control}
           errors={errors}
           departments={departments}
+          consultationDesigns={consultationDesigns}
           idPrefix="ed"
         />
         {errors.root ? <FieldError errors={[errors.root]} /> : null}

@@ -237,8 +237,10 @@ function AdmittedView({
       <BackLink />
       <PatientHeader detail={detail} status="admitted" />
 
+      {/* min-w-0 on both columns: on phones the single auto track would otherwise
+          floor at the expense rows' min-content and push the page sideways. */}
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           {/* Expenses */}
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 text-[15px] font-bold text-foreground">Expenses</h2>
@@ -273,7 +275,7 @@ function AdmittedView({
         </div>
 
         {/* Right: running total + discharge (sticky) */}
-        <div className="space-y-3 lg:sticky lg:top-4">
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-4">
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 text-[15px] font-bold text-foreground">Running bill</h2>
             <dl className="space-y-1.5 text-sm">
@@ -805,20 +807,26 @@ function ExpenseRow({
             services={services}
             value={serviceId}
             onChange={(id) => save({ serviceId: id })}
-            className="min-w-0 flex-1"
+            // w-0 flex-1 (not min-w-0): the picker takes whatever space the fixed
+            // qty/price/remove columns leave, so the row fits a phone screen -
+            // the trigger label truncates.
+            className="w-0 flex-1"
           />
         ) : (
           // The catalog no longer has this service, so it can't be re-picked or
           // re-priced - show the stored name; remove is still available.
-          <span className="min-w-0 flex-1 truncate text-foreground">{expense.item}</span>
+          <span className="w-0 flex-1 truncate text-foreground">{expense.item}</span>
         )}
+        {/* Phone: qty narrows and the price column sizes to its amount (never
+            clipped) so the service picker keeps a readable share of the row. */}
         <QtyField
           value={qtyText}
           onChange={setQtyText}
           onCommit={commitQty}
           label={`${expense.item} quantity`}
+          className="w-12 sm:w-16"
         />
-        <span className="w-24 shrink-0 text-right font-semibold text-foreground">
+        <span className="min-w-16 shrink-0 text-right font-semibold text-foreground sm:w-24">
           ₹{formatPaise(expense.total_paise)}
         </span>
         <button
@@ -892,7 +900,7 @@ function DraftExpenseRow({
           value=""
           onChange={pick}
           placeholder="Add an item…"
-          className="min-w-0 flex-1"
+          className="w-0 flex-1"
         />
         <QtyField
           value={qtyText}
@@ -902,8 +910,9 @@ function DraftExpenseRow({
             if (text === "" || !Number.isInteger(n) || n < 1 || n > 9999) setQtyText("1");
           }}
           label="new item quantity"
+          className="w-12 sm:w-16"
         />
-        <span className="w-24 shrink-0 text-right font-semibold text-muted-foreground">
+        <span className="min-w-16 shrink-0 text-right font-semibold text-muted-foreground sm:w-24">
           {busy ? <Loader2 className="ml-auto size-4 animate-spin" aria-hidden /> : "—"}
         </span>
         {/* Keeps this row's columns aligned with the remove button above it. */}

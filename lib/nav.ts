@@ -39,9 +39,15 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   // Procedures is a plain counter-ROLE capability (op_desk / op_ip_desk / admin):
   // billing from the catalogue is the desk's job, so the link always applies to
   // op_desk. The page/action re-checks the role server-side (dev-rules §8).
+  //
+  // OPD/IPD point at the read-only LISTS (documents plan: every staff role can
+  // open them to attach/view scans) - OPD goes straight to the history list, not
+  // the intake flow, and every IP/billing mutation stays server-gated.
   op_desk: [
     { href: "/desk", label: "Counter" },
     { href: "/procedures", label: "Procedures" },
+    { href: "/consultations/history", label: "OPD" },
+    { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "My Day" },
   ],
   // OP+IN desk also starts consultations (admin + this role only).

@@ -8,6 +8,7 @@ import { zodFieldErrors } from "@/lib/forms/action-result";
 import type { ActionResult } from "@/lib/forms/action-result";
 import { getUserLocationId } from "@/lib/users/repository";
 import { listDepartments } from "@/lib/departments/repository";
+import { getTemplateById } from "@/lib/printing/repository";
 import {
   newDoctorSchema,
   updateDoctorSchema,
@@ -22,6 +23,24 @@ import { createDoctor, updateDoctor, setDoctorActive } from "./repository";
 async function isKnownDepartment(name: string, locationId: string): Promise<boolean> {
   const departments = await listDepartments(locationId);
   return departments.some((d) => d.name === name);
+}
+
+// The form sends "" for "use the default consultation design" and an id for a
+// custom one (migration 0024). An id is only accepted if it is a real
+// CONSULTATION design at THIS location - the FK alone can't check either, and a
+// mis-pointed row would otherwise sit in the table until the print route
+// silently fell back. Returns the value to store, or an error for the field.
+async function resolveConsultationTemplate(
+  raw: string,
+  locationId: string,
+): Promise<{ value: string | null } | { error: string }> {
+  if (!raw) return { value: null }; // default design - the common case
+  const tpl = await getTemplateById(raw, locationId);
+  if (!tpl) return { error: "That design no longer exists. Pick another." };
+  if (tpl.bill_type !== "consultation") {
+    return { error: "Pick a consultation design." };
+  }
+  return { value: raw };
 }
 
 // Split the form's single percent-OR-flat share field into the two DB columns
@@ -73,6 +92,11 @@ export async function createDoctorAction(
     return { ok: false, fieldErrors: { department: "Select a department from the list." } };
   }
 
+  const template = await resolveConsultationTemplate(v.consultationTemplateId, locationId);
+  if ("error" in template) {
+    return { ok: false, fieldErrors: { consultationTemplateId: template.error } };
+  }
+
   const { id } = await createDoctor({
     name: v.name,
     department: v.department,
@@ -81,6 +105,7 @@ export async function createDoctorAction(
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
     ...resolveDoctorShare(v),
+    consultation_template_id: template.value,
     location_id: locationId,
   });
 
@@ -116,6 +141,11 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
     return { ok: false, fieldErrors: { department: "Select a department from the list." } };
   }
 
+  const template = await resolveConsultationTemplate(v.consultationTemplateId, locationId);
+  if ("error" in template) {
+    return { ok: false, fieldErrors: { consultationTemplateId: template.error } };
+  }
+
   await updateDoctor({
     id: v.id,
     name: v.name,
@@ -125,6 +155,7 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
     ...resolveDoctorShare(v),
+    consultation_template_id: template.value,
   });
 
   await logActivity({

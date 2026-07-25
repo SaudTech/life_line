@@ -91,6 +91,18 @@ function validateDoctorShare(
   }
 }
 
+// Which consultation receipt design this doctor's bills print on (migration
+// 0024). "" means "use the default" - the location's ACTIVE consultation design
+// - and is what every doctor has until an admin picks otherwise; anything else
+// is a bill_templates id. The shape is all that's checked here: that the id is a
+// real, CONSULTATION design at this doctor's location can only be verified
+// against the DB, so the action does it (never trust the client).
+const consultationTemplateId = z
+  .string()
+  .trim()
+  .regex(/^\d*$/, "Select a design from the list.")
+  .default("");
+
 const doctorShareShape = { doctorShareType, doctorShareValue };
 
 export const newDoctorSchema = z
@@ -101,6 +113,7 @@ export const newDoctorSchema = z
     status,
     fee,
     revisitValidityDays,
+    consultationTemplateId,
     ...doctorShareShape,
   })
   .superRefine(validateDoctorShare);
@@ -115,6 +128,7 @@ export const updateDoctorSchema = z
     status,
     fee,
     revisitValidityDays,
+    consultationTemplateId,
     ...doctorShareShape,
   })
   .superRefine(validateDoctorShare);

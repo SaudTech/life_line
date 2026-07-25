@@ -27,12 +27,16 @@ export interface DoctorListRow {
   share_type: string;
   share_percentage: number;
   share_flat_paise: string | null;
+  // The consultation receipt design this doctor's bills print on (migration
+  // 0024), or NULL for the location's active/default design. A BIGINT, so pg
+  // returns it as a string.
+  consultation_template_id: string | null;
   active: boolean;
   created_at: Date;
 }
 
 const SELECT_COLUMNS =
-  "id, name, department, phone, status, fee_paise, revisit_validity_days, share_type, share_percentage, share_flat_paise, active, created_at";
+  "id, name, department, phone, status, fee_paise, revisit_validity_days, share_type, share_percentage, share_flat_paise, consultation_template_id::text, active, created_at";
 
 // All doctors (active AND inactive) - the client shows both. Ordered by name for
 // a stable, muscle-memory list.
@@ -74,6 +78,8 @@ export interface CreateDoctorInput {
   share_type: string;
   share_percentage: number;
   share_flat_paise: number | null;
+  // null = print the location's active consultation design (migration 0024).
+  consultation_template_id: string | null;
   location_id: string; // bigint returned by pg as string
 }
 
@@ -81,8 +87,8 @@ export async function createDoctor(
   input: CreateDoctorInput,
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO doctors (name, department, phone, status, fee_paise, revisit_validity_days, share_type, share_percentage, share_flat_paise, location_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO doctors (name, department, phone, status, fee_paise, revisit_validity_days, share_type, share_percentage, share_flat_paise, consultation_template_id, location_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
     [
       input.name,
@@ -94,6 +100,7 @@ export async function createDoctor(
       input.share_type,
       input.share_percentage,
       input.share_flat_paise,
+      input.consultation_template_id,
       input.location_id,
     ],
   );
@@ -111,6 +118,7 @@ export interface UpdateDoctorInput {
   share_type: string;
   share_percentage: number;
   share_flat_paise: number | null;
+  consultation_template_id: string | null;
 }
 
 // UPDATE the editable details (never the location or created_at).
@@ -118,7 +126,8 @@ export async function updateDoctor(input: UpdateDoctorInput): Promise<void> {
   await pool.query(
     `UPDATE doctors
         SET name = $2, department = $3, phone = $4, status = $5, fee_paise = $6, revisit_validity_days = $7,
-            share_type = $8, share_percentage = $9, share_flat_paise = $10
+            share_type = $8, share_percentage = $9, share_flat_paise = $10,
+            consultation_template_id = $11
       WHERE id = $1`,
     [
       input.id,
@@ -131,6 +140,7 @@ export async function updateDoctor(input: UpdateDoctorInput): Promise<void> {
       input.share_type,
       input.share_percentage,
       input.share_flat_paise,
+      input.consultation_template_id,
     ],
   );
 }

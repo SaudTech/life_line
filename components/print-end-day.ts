@@ -1,5 +1,7 @@
 "use client";
 
+import { setPrintJobName } from "@/components/print-job-name";
+
 // The reports page's print entry point for the A4 End-Day sheet (print-updates
 // plan §4c) - opens the end-day PDF route in a hidden iframe and calls the
 // browser's native print dialog, exactly like components/print-receipt.ts for
@@ -25,11 +27,16 @@ export function printEndDay(dayIso: string, subject?: string): void {
   let handled = false;
   iframe.onload = () => {
     handled = true;
+    // Names the file when the operator saves instead of printing, matching the
+    // route's own Content-Disposition filename.
+    const restoreTitle = setPrintJobName(`end-day-${dayIso}`);
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } catch {
       window.open(url, "_blank");
+    } finally {
+      restoreTitle();
     }
     setTimeout(() => iframe.remove(), 60_000);
   };

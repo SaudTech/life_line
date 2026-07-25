@@ -99,6 +99,36 @@ export interface MoneyRaw {
   refunds: { count: number; totalPaise: number };
 }
 
+// ── Document upload compliance (raw) ───────────────────────────────────────────
+// Every consultation and IP discharge is supposed to get its scans / case-study
+// documents uploaded (patient_documents). This block is how the day report says
+// "you still owe uploads": for the scoped subject and day, how many records of
+// each kind they produced, and WHICH ones still have zero live documents. Checked
+// live at report time - a document uploaded (or admin-deleted) after the day
+// moves a record out of (or back into) the pending list, which is the honest
+// reading of "pending work".
+
+// One record still awaiting its documents - identified the way the staff see it
+// on the OPD/IPD lists (record #) plus the patient, so it can be found and
+// finished rather than hunted for.
+export interface PendingDocumentRow {
+  recordId: string; // consultation id (opd) / admission id (ipd)
+  patientName: string;
+  patientCode: string;
+}
+
+export interface DocumentComplianceRaw {
+  // total: consultations the subject billed in the range (final bills).
+  // pending: the subset with no live documents, oldest first.
+  opd: { total: number; pending: PendingDocumentRow[] };
+  // Same, for admissions the subject DISCHARGED in the range (final ip bills).
+  ipd: { total: number; pending: PendingDocumentRow[] };
+}
+
+export function emptyDocumentComplianceRaw(): DocumentComplianceRaw {
+  return { opd: { total: 0, pending: [] }, ipd: { total: 0, pending: [] } };
+}
+
 // ── Shaped output (exactly what the UI renders) ────────────────────────────────
 export interface ReportLine {
   key: string;
@@ -151,9 +181,23 @@ export interface DailyReport {
   // nets the refund into the bill instead) - if the two ever disagree, one of them is
   // lying about the hospital's money.
   moneyInTotalPaise: number;
+  // Document upload compliance: of the records this subject produced on the day,
+  // how many have their scans uploaded and exactly which are still pending. Not
+  // money - operational pending WORK, and the report is where it gets called out.
+  documents: {
+    opd: DocumentComplianceLine;
+    ipd: DocumentComplianceLine;
+    pendingTotal: number; // opd pending + ipd pending, for the one-line callout
+  };
   // True when there is genuinely nothing to show - drives an honest empty state
   // instead of a wall of zeros or a crash (§7).
   isEmpty: boolean;
+}
+
+export interface DocumentComplianceLine {
+  total: number; // records of this kind the subject produced in the range
+  withDocuments: number; // total − pending, clamped at 0 (never negative)
+  pending: PendingDocumentRow[]; // the exact records still owing uploads
 }
 
 // Index grouped rows by key for O(1) zero-filled lookup.
@@ -183,6 +227,9 @@ function layout<K extends string>(
 export function shapeDailyReport(
   activityCounts: ActivityCountRow[],
   money: MoneyRaw,
+  // Optional so callers that don't surface compliance (the pdfme End-Day PDF)
+  // keep working unchanged - they simply get an all-zero block.
+  documents: DocumentComplianceRaw = emptyDocumentComplianceRaw(),
 ): DailyReport {
   const activityByAction = new Map<string, number>();
   for (const c of activityCounts) activityByAction.set(c.action, c.count);
@@ -215,6 +262,20 @@ export function shapeDailyReport(
   const advancesTotalPaise = advancesByMode.reduce((sum, l) => sum + l.totalPaise, 0);
   const advancesCount = advancesByMode.reduce((sum, l) => sum + l.count, 0);
 
+  // withDocuments as a REMAINDER of the two figures the repository reads, clamped
+  // so a count race (a record billed between the total and pending queries) can
+  // never print "-1 with documents" on the sheet.
+  const shapeCompliance = (c: {
+    total: number;
+    pending: PendingDocumentRow[];
+  }): DocumentComplianceLine => ({
+    total: c.total,
+    withDocuments: Math.max(0, c.total - c.pending.length),
+    pending: c.pending,
+  });
+  const opdDocs = shapeCompliance(documents.opd);
+  const ipdDocs = shapeCompliance(documents.ipd);
+
   const isEmpty =
     activity.length === 0 &&
     collectedCount === 0 &&
@@ -246,6 +307,11 @@ export function shapeDailyReport(
     // billCollectedSql). Do not net it in there as well, or a refunded day is short by
     // twice the refund.
     moneyInTotalPaise: collectedTotalPaise + advancesTotalPaise - money.refunds.totalPaise,
+    documents: {
+      opd: opdDocs,
+      ipd: ipdDocs,
+      pendingTotal: opdDocs.pending.length + ipdDocs.pending.length,
+    },
     isEmpty,
   };
 }
