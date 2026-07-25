@@ -15,6 +15,7 @@
     "seed:departments": "node --env-file=.env scripts/seed-departments.mjs",
     "export:bill-templates": "node --env-file=.env scripts/export-bill-templates.mjs",
     "import:bill-templates": "node --env-file=.env scripts/import-bill-templates.mjs",
+    "import:bill-templates-csv": "node --env-file=.env scripts/import-bill-templates-csv.mjs",
     "test": "vitest run"
   },
   "dependencies": {
