@@ -34,3 +34,28 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+
+
+
+## PM2
+
+### First time setup
+pm2 start ecosystem.config.js
+pm2 save
+
+### After Windows restart
+pm2 resurrect
+
+### Common commands
+pm2 list
+pm2 logs LifeLineHospital_app
+pm2 logs ngrok-tunnel
+pm2 restart LifeLineHospital_app
+pm2 restart ngrok-tunnel
+pm2 restart ecosystem.config.js
+
+### After code changes
+npm run build
+pm2 restart LifeLineHospital_app
