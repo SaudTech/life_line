@@ -12,6 +12,9 @@
     "seed:doctors": "node --env-file=.env scripts/seed-doctors.mjs",
     "seed:services": "node --env-file=.env scripts/seed-services.mjs",
     "seed:demo": "node --env-file=.env scripts/seed-demo.mjs",
+    "seed:departments": "node --env-file=.env scripts/seed-departments.mjs",
+    "export:bill-templates": "node --env-file=.env scripts/export-bill-templates.mjs",
+    "import:bill-templates": "node --env-file=.env scripts/import-bill-templates.mjs",
     "test": "vitest run"
   },
   "dependencies": {
