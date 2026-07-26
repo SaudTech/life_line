@@ -334,6 +334,13 @@ export function ReceiptEditor({ row }: { row: BillTemplateRow }) {
         height: 40,
         rotate: 0,
         opacity: 1,
+        // Static artwork (a logo), not a data-bound field - it has no entry in
+        // lib/printing/fields.ts's catalog, so billDocumentToInputs never emits
+        // an input for it. pdfme only falls back to the schema's own saved
+        // `content` when readOnly is true; without this, generate() treats the
+        // missing input as "" and the image renders blank on both Preview and
+        // the real printed receipt (the pdf route uses the same inputs map).
+        readOnly: true,
       });
     };
     reader.readAsDataURL(file);
