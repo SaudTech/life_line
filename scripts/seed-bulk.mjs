@@ -22,6 +22,21 @@ if (!connectionString) {
   process.exit(1);
 }
 
+// The doctor's frozen cut of one consultation bill, mirroring snapshotDoctorShare in
+// lib/doctors/share.ts (percentage OR flat, clamped to what the bill collected).
+// Seeded bills must carry it like real ones do - migration 0025 made the share a
+// STORED column, so a seed that skips it produces consultations that look normal on
+// the day sheet but pay every doctor ₹0 on the earnings report.
+function doctorShareSnapshot(collectedPaise, doctor) {
+  if (doctor.share_type === "flat") {
+    const flat = doctor.share_flat_paise == null ? 0 : Number(doctor.share_flat_paise);
+    return { paise: Math.min(flat, collectedPaise), type: "flat", pct: null, flat };
+  }
+  const pct = Number(doctor.share_percentage ?? 0);
+  const raw = Math.round((collectedPaise * pct) / 100);
+  return { paise: Math.min(raw, collectedPaise), type: "percentage", pct, flat: null };
+}
+
 const client = new pg.Client({ connectionString });
 
 // Anchor around the project's "today" so the daily report + charts read as a
@@ -64,7 +79,9 @@ try {
   const supervisor = byRole("supervisor");
 
   const { rows: doctors } = await client.query(
-    "SELECT id, name, fee_paise, revisit_validity_days FROM doctors ORDER BY id",
+    `SELECT id, name, fee_paise, revisit_validity_days,
+            share_type, share_percentage, share_flat_paise
+       FROM doctors ORDER BY id`,
   );
   const doc = (nameFragment) => {
     const d = doctors.find((x) => x.name.includes(nameFragment));
@@ -134,21 +151,26 @@ try {
   async function makeBill({
     patient, type, items, discount = 0, paymentMode = "cash",
     status = "final", createdBy, createdAt, admissionId = null,
-    consultationId = null, discountApprovedBy = null, voided = null,
+    consultationId = null, discountApprovedBy = null, voided = null, doctor = null,
   }) {
     const subtotal = items.reduce((s, it) => s + it.qty * it.unit, 0);
     const total = subtotal - discount;
+    // Only a consultation bill owes a doctor anything; procedure/IP bills store a
+    // truthful zero with no rate, exactly as the app writes them.
+    const share = doctor ? doctorShareSnapshot(total, doctor) : null;
     const { rows } = await client.query(
       `INSERT INTO bills
         (patient_id, type, subtotal_paise, discount_paise, total_paise, status,
          payment_mode, discount_approved_by, created_by, created_at,
-         admission_id, consultation_id, voided_by, voided_at, void_reason, location_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         admission_id, consultation_id, voided_by, voided_at, void_reason, location_id,
+         doctor_share_paise, doctor_share_type, doctor_share_percentage, doctor_share_flat_paise)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING id`,
       [
         patientId[patient], type, subtotal, discount, total, status,
         paymentMode, discountApprovedBy, createdBy, createdAt, admissionId, consultationId,
         voided?.by ?? null, voided?.at ?? null, voided?.reason ?? null, locationId,
+        share?.paise ?? 0, share?.type ?? null, share?.pct ?? null, share?.flat ?? null,
       ],
     );
     const billId = rows[0].id;
@@ -176,7 +198,7 @@ try {
     return makeBill({
       patient, type: "consultation", consultationId: rows[0].id,
       items: [{ desc: `Consultation - ${d.name}`, qty: 1, unit: Number(d.fee_paise) }],
-      paymentMode, createdBy, createdAt,
+      paymentMode, createdBy, createdAt, doctor: d,
     });
   }
 

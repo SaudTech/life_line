@@ -1,10 +1,10 @@
 import { pool } from "@/lib/db";
 import type { IsoDay } from "@/lib/consultations/rules";
-import { doctorShareSql } from "@/lib/doctors/share";
 import { billCollectedSql, clinicRange, toPaise } from "@/lib/money-in";
 import {
   emptyMoneyRaw,
   type ActivityCountRow,
+  type DoctorPayoutRow,
   type DoctorShareRow,
   type DocumentComplianceRaw,
   type MoneyGroupRow,
@@ -136,32 +136,40 @@ export async function getMoneySummary(
     args,
   );
 
-  // The doctor's cut of the scoped consultation bills, grouped per doctor. The
-  // per-bill share comes from the ONE tested rule (lib/doctors/share.ts), priced
-  // on what each bill COLLECTED and at the doctor's CURRENT rate (nothing is
-  // snapshotted). A legacy bill with consultation_id NULL drops out of the join -
-  // its money simply stays with the hospital in the shaper's remainder. The rate
-  // columns ride along so the sheet can say how each figure was arrived at.
+  // The doctor's cut of the scoped consultation bills, grouped per doctor. Read
+  // from the SNAPSHOT frozen onto each bill when it was written (migration 0025) -
+  // NOT recomputed from the doctor's rate today, or a rate raised this evening
+  // would silently restate a sheet reconciled this morning. A legacy bill with
+  // consultation_id NULL drops out of the join; its money simply stays with the
+  // hospital in the shaper's remainder.
+  //
+  // The rate is grouped from the BILLS too, for the same reason: the sheet must say
+  // how each figure was arrived at at the time, not what the doctor is on now. A
+  // doctor whose rate changed mid-window therefore lands as two rows, one per rate,
+  // which is the honest reading of a window that was priced two ways.
   const doctorShares = pool.query<{
     doctor_id: string;
     doctor_name: string;
-    share_type: string;
-    share_percentage: number;
+    share_type: string | null;
+    share_percentage: number | null;
     share_flat_paise: string | null;
     count: number;
     share_paise: string;
   }>(
     `SELECT d.id::text AS doctor_id, d.name AS doctor_name,
-            d.share_type, d.share_percentage, d.share_flat_paise,
+            b.doctor_share_type       AS share_type,
+            b.doctor_share_percentage AS share_percentage,
+            b.doctor_share_flat_paise AS share_flat_paise,
             count(*)::int AS count,
-            COALESCE(sum(${doctorShareSql(billCollectedSql("b"), "d")}), 0)::bigint AS share_paise
+            COALESCE(sum(b.doctor_share_paise), 0)::bigint AS share_paise
        FROM bills b
        JOIN consultations c ON c.id = b.consultation_id
        JOIN doctors d ON d.id = c.doctor_id
       WHERE ($1::uuid IS NULL OR b.created_by = $1) AND b.location_id = $4
         AND b.status = 'final' AND b.type = 'consultation'
         AND ${clinicRange("b.created_at", 2, 3)}
-      GROUP BY d.id, d.name, d.share_type, d.share_percentage, d.share_flat_paise
+      GROUP BY d.id, d.name, b.doctor_share_type, b.doctor_share_percentage,
+               b.doctor_share_flat_paise
       ORDER BY d.name ASC, d.id ASC`,
     args,
   );
@@ -193,7 +201,40 @@ export async function getMoneySummary(
     args,
   );
 
-  const [bt, bm, dm, da, vo, ds, av, rf] = await Promise.all([
+  // Cash handed to doctors today (migration 0026), per doctor. This is the ONLY
+  // outflow on the sheet that nothing else already accounts for: a refund is netted
+  // inside the bill it came from, but no bill knows a payout happened, so without this
+  // query the sheet tells the counter to expect money that physically left hours ago.
+  //
+  // THREE DELIBERATE CHOICES, each the opposite of what the doctor-earnings sheet does:
+  //   • paid_at, NOT covers_day. A Monday shift settled on Wednesday is Wednesday's
+  //     cash movement. The earnings sheet asks "which shift" and reckons on covers_day;
+  //     this one asks "which drawer" and reckons on when the notes moved.
+  //   • paid_by, NOT the doctor. The subject axis of this whole file is the staff
+  //     member being reported on, and a payout belongs to whoever's till it came out
+  //     of - the same rule as created_by for bills and voided_by for voids.
+  //   • voided_at IS NULL. A voided payout is a correction, not an outflow (§6:
+  //     nothing is silently deleted, so the row survives and is filtered here).
+  const doctorPayouts = pool.query<{
+    doctor_id: string;
+    doctor_name: string;
+    count: number;
+    paise: string;
+  }>(
+    `SELECT d.id::text AS doctor_id, d.name AS doctor_name,
+            COALESCE(sum(p.consultation_count), 0)::int AS count,
+            COALESCE(sum(p.paid_paise), 0)::bigint AS paise
+       FROM doctor_payouts p
+       JOIN doctors d ON d.id = p.doctor_id
+      WHERE ($1::uuid IS NULL OR p.paid_by = $1) AND p.location_id = $4
+        AND p.voided_at IS NULL
+        AND ${clinicRange("p.paid_at", 2, 3)}
+      GROUP BY d.id, d.name
+      ORDER BY d.name ASC, d.id ASC`,
+    args,
+  );
+
+  const [bt, bm, dm, da, vo, ds, av, rf, dp] = await Promise.all([
     billsByType,
     billsByMode,
     discountMine,
@@ -202,6 +243,7 @@ export async function getMoneySummary(
     doctorShares,
     advancesByMode,
     refunds,
+    doctorPayouts,
   ]);
 
   const toGroup = (r: { key: string; count: number; total_paise: string }): MoneyGroupRow => ({
@@ -227,9 +269,12 @@ export async function getMoneySummary(
       (r): DoctorShareRow => ({
         doctorId: r.doctor_id,
         doctorName: r.doctor_name,
+        // Nullable: a legacy consultation bill written before 0025 carries an
+        // amount but no recorded rate. Passed through as null rather than defaulted
+        // to "0%", which would be a rate the bill never had.
         shareType: r.share_type,
         sharePercentage: r.share_percentage,
-        shareFlatPaise: toPaise(r.share_flat_paise),
+        shareFlatPaise: r.share_flat_paise == null ? null : toPaise(r.share_flat_paise),
         count: r.count,
         sharePaise: toPaise(r.share_paise),
       }),
@@ -239,6 +284,14 @@ export async function getMoneySummary(
       count: rf.rows[0]?.count ?? 0,
       totalPaise: toPaise(rf.rows[0]?.total_paise ?? null),
     },
+    doctorPayouts: dp.rows.map(
+      (r): DoctorPayoutRow => ({
+        doctorId: r.doctor_id,
+        doctorName: r.doctor_name,
+        count: r.count,
+        paise: toPaise(r.paise),
+      }),
+    ),
   };
 }
 

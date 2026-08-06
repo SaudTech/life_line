@@ -27,8 +27,26 @@ if (!connectionString) {
 
 const client = new pg.Client({ connectionString });
 
-// The clinic's "today" (Asia/Kolkata calendar day) this data is anchored to.
-const CLINIC_DAY = "2026-07-22";
+// The clinic day this data is anchored to. Defaults to the REAL clinic today
+// (Asia/Kolkata calendar day, the same reckoning as lib/date-range.ts clinicToday) -
+// it used to be a hardcoded date, so "seed today" quietly filled in a day months in
+// the past and every screen still looked empty. Override with --day YYYY-MM-DD to
+// backfill a specific day.
+function clinicToday() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+const dayArgIndex = process.argv.indexOf("--day");
+const dayArg = dayArgIndex !== -1 ? process.argv[dayArgIndex + 1] : null;
+if (dayArg && !/^\d{4}-\d{2}-\d{2}$/.test(dayArg)) {
+  console.error("\n✗ --day must be YYYY-MM-DD.\n");
+  process.exit(1);
+}
+const CLINIC_DAY = dayArg || clinicToday();
 
 // Convert an IST wall-clock hour/minute on CLINIC_DAY to a UTC instant (IST = UTC+5:30).
 function istIso(hour, min = 0) {
@@ -41,6 +59,21 @@ function addDaysIso(dateOnly, days) {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + days);
   return dt.toISOString().slice(0, 10);
+}
+
+// The doctor's frozen cut of one consultation bill, mirroring snapshotDoctorShare in
+// lib/doctors/share.ts (percentage OR flat, clamped to what the bill collected).
+// Seeded bills must carry it like real ones do - migration 0025 made the share a
+// STORED column, so a seed that skips it produces consultations that look normal on
+// the day sheet but pay every doctor ₹0 on the earnings report.
+function doctorShareSnapshot(collectedPaise, doctor) {
+  if (doctor.share_type === "flat") {
+    const flat = doctor.share_flat_paise == null ? 0 : Number(doctor.share_flat_paise);
+    return { paise: Math.min(flat, collectedPaise), type: "flat", pct: null, flat };
+  }
+  const pct = Number(doctor.share_percentage ?? 0);
+  const raw = Math.round((collectedPaise * pct) / 100);
+  return { paise: Math.min(raw, collectedPaise), type: "percentage", pct, flat: null };
 }
 
 function pick(arr) {
@@ -132,7 +165,9 @@ try {
   const staffName = (id) => users.find((u) => u.id === id).name;
 
   const { rows: doctorsRaw } = await client.query(
-    "SELECT id, name, fee_paise, revisit_validity_days FROM doctors WHERE active ORDER BY id",
+    `SELECT id, name, fee_paise, revisit_validity_days,
+            share_type, share_percentage, share_flat_paise
+       FROM doctors WHERE active ORDER BY id`,
   );
   // Exclude stray/test rows (e.g. a bare "Dr List" entry with no real name).
   const doctors = doctorsRaw.filter((d) => /^Dr\.?\s+\S/.test(d.name));
@@ -147,19 +182,24 @@ try {
   const price = (name) => Number(svc(name).price_paise);
 
   // --- idempotency guard ----------------------------------------------------
+  // Idempotence sentinel, keyed PER DAY. It used to be one fixed name, so once any
+  // day had been seeded every later run short-circuited and no other day could ever
+  // be filled - which is exactly what a script called "seed today" must be able to
+  // do again tomorrow.
   const SENTINEL_PHONE = "9000000001";
+  const SENTINEL_NAME = `Seed Today Sentinel ${CLINIC_DAY}`;
   const { rows: sentinel } = await client.query(
     "SELECT id FROM patients WHERE phone = $1 AND name = $2 LIMIT 1",
-    [SENTINEL_PHONE, "Seed Today Sentinel"],
+    [SENTINEL_PHONE, SENTINEL_NAME],
   );
   if (sentinel.length > 0) {
-    console.log(`\n✓ Today's data (${CLINIC_DAY}) already seeded - nothing to add.\n`);
+    console.log(`\n✓ ${CLINIC_DAY} already seeded - nothing to add.\n`);
     process.exit(0);
   }
   await client.query(
     `INSERT INTO patients (name, age, gender, phone, area, location_id, created_at)
      VALUES ($1,1,'other',$2,'Seed',$3,$4)`,
-    ["Seed Today Sentinel", SENTINEL_PHONE, locationId, istIso(8, 0)],
+    [SENTINEL_NAME, SENTINEL_PHONE, locationId, istIso(8, 0)],
   );
 
   // --- patient pool (bulk-registered walk-ins for today) --------------------
@@ -187,23 +227,28 @@ try {
     patientId, type, items, discount = 0, paymentMode = "cash",
     status = "final", createdBy, createdAt, admissionId = null,
     consultationId = null, discountApprovedBy = null, voided = null,
-    balanceDuePaise = 0, refundPaise = 0,
+    balanceDuePaise = 0, refundPaise = 0, doctor = null,
   }) {
     const subtotal = items.reduce((s, it) => s + it.qty * it.unit, 0);
     const total = subtotal - discount;
+    // Only a consultation bill owes a doctor anything; procedure/IP bills store a
+    // truthful zero with no rate, exactly as the app writes them.
+    const share = doctor ? doctorShareSnapshot(total, doctor) : null;
     const { rows } = await client.query(
       `INSERT INTO bills
         (patient_id, type, subtotal_paise, discount_paise, total_paise, status,
          payment_mode, discount_approved_by, created_by, created_at,
          admission_id, consultation_id, voided_by, voided_at, void_reason, location_id,
-         balance_due_paise, refund_paise)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         balance_due_paise, refund_paise,
+         doctor_share_paise, doctor_share_type, doctor_share_percentage, doctor_share_flat_paise)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING id, bill_number`,
       [
         patientId, type, subtotal, discount, total, status,
         paymentMode, discountApprovedBy, createdBy, createdAt, admissionId, consultationId,
         voided?.by ?? null, voided?.at ?? null, voided?.reason ?? null, locationId,
         balanceDuePaise, refundPaise,
+        share?.paise ?? 0, share?.type ?? null, share?.pct ?? null, share?.flat ?? null,
       ],
     );
     const billId = rows[0].id;
@@ -240,6 +285,7 @@ try {
       items: [{ desc: `Consultation - ${doctor.name}`, qty: 1, unit: subtotal }],
       paymentMode: weighted(PAYMENT_MODES), createdBy, createdAt,
       discount, discountApprovedBy: discount > 0 ? d.approvedBy : null,
+      doctor,
     });
   }
 

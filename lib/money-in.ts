@@ -101,6 +101,40 @@ export function clinicRange(col: string, fromParam: number, toParam: number): st
       AND ${col} <  (($${toParam}::date + 1))::timestamp AT TIME ZONE '${CLINIC_TZ}'`;
 }
 
+// A predicate matching a timestamptz column against ONE OR MORE half-open clinic
+// wall-clock windows ('YYYY-MM-DD HH:MM'), OR-ed together:
+//   [ from₁ IST , to₁ IST )  OR  [ from₂ IST , to₂ IST )  OR  …
+// Parameters are read in pairs starting at `firstParam`: (from₁, to₁, from₂, to₂, …).
+//
+// Same AT TIME ZONE discipline and same index-friendly shape as clinicRange - the
+// filtered column is never wrapped in a per-row function, so each disjunct can still
+// use the (location_id, status, created_at) index - but with time of day instead of
+// whole days.
+//
+// WHY THIS EXISTS ALONGSIDE clinicRange. clinicRange answers "which clinic DAY",
+// the right axis for a day sheet reconciled at close. It cannot express a doctor's
+// 12:00-14:00 shift, because a date has no time of day. Doctors are paid per shift,
+// so the doctor-earnings query is built on this instead; a whole day is simply the
+// single window 00:00 → next 00:00, and the two then agree exactly.
+//
+// WHY SEVERAL WINDOWS. A doctor works 12:00-14:00 and again 18:00-20:00 and is paid
+// for both at once. That is not a range - the afternoon between them is somebody
+// else's work - so it cannot be expressed as one [from, to). OR-ing the windows is
+// safe against double counting: a row matching two disjuncts is still one row.
+export function clinicInstantWindows(col: string, firstParam: number, count: number): string {
+  if (count < 1) throw new Error(`clinicInstantWindows needs at least one window, got: ${count}`);
+  const parts: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const f = firstParam + i * 2;
+    const t = f + 1;
+    parts.push(
+      `(${col} >= ($${f}::timestamp AT TIME ZONE '${CLINIC_TZ}')
+        AND ${col} <  ($${t}::timestamp AT TIME ZONE '${CLINIC_TZ}'))`,
+    );
+  }
+  return `(${parts.join("\n        OR ")})`;
+}
+
 // Read a BIGINT sum pg returns as text into an integer. A location's daily/monthly
 // totals are far below Number.MAX_SAFE_INTEGER, so this stays exact - it only bridges
 // pg's text BIGINT into JS, and is never a float in the money path (§4).

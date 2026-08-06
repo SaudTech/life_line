@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Eye, EyeOff, Loader2, ClipboardList, Printer, RotateCcw } from "lucide-react";
+import { Check, Eye, EyeOff, Info, Loader2, ClipboardList, Printer, RotateCcw } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import {
   Dialog,
@@ -211,7 +212,11 @@ export function ConsultationFlow({
     setOutcome(null);
   }
 
-  const isRevisit = preview?.kind === "revisit";
+  // Free revisit = no money, no receipt, notes optional. A PAID revisit is a
+  // billed visit like any other - it just costs one of the doctor's reduced
+  // rates instead of the full fee - so it takes the full payment UI.
+  const isRevisit = preview?.kind === "free-revisit";
+  const isPaidRevisit = preview?.kind === "paid-revisit";
   const subtotalPaise = preview ? preview.feePaise : 0;
   const totalPaise = discount ? discount.totalPaise : subtotalPaise;
   const detailsReady = !!preview;
@@ -522,6 +527,7 @@ export function ConsultationFlow({
             </>
           ) : (
             <>
+              {isPaidRevisit ? <RevisitRateNote preview={preview} /> : null}
               <label className="mb-4 flex flex-col gap-1.5 text-xs font-semibold text-muted-foreground">
                 Reason for visit / symptoms
                 <textarea
@@ -557,7 +563,9 @@ export function ConsultationFlow({
               {/* Fee + discount summary */}
               <div className="rounded-xl border bg-muted/20 p-4">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Consultation fee</span>
+                  <span className="text-muted-foreground">
+                    {isPaidRevisit ? "Revisit rate" : "Consultation fee"}
+                  </span>
                   <span className="font-medium text-foreground">₹{formatPaise(subtotalPaise)}</span>
                 </div>
                 {discount ? (
@@ -614,7 +622,9 @@ export function ConsultationFlow({
           {formError ? <p className="mb-3 text-sm font-medium text-destructive">{formError}</p> : null}
           <Button type="button" size="lg" className="w-full" disabled={!canConfirm} onClick={confirm}>
             {submitting ? <Loader2 className="animate-spin" aria-hidden /> : null}
-            {isRevisit ? "Confirm free revisit" : `Confirm consultation · ₹${formatPaise(totalPaise)}`}
+            {isRevisit
+              ? "Confirm free revisit"
+              : `Confirm ${isPaidRevisit ? "revisit" : "consultation"} · ₹${formatPaise(totalPaise)}`}
           </Button>
         </div>
       ) : null}
@@ -639,6 +649,10 @@ export function ConsultationFlow({
       {pinOpen && doctorId ? (
         <PinDialog
           doctorId={doctorId}
+          // Lets the server discount the REVISIT rate rather than the full fee
+          // when this visit is a paid revisit. Absent while registering a new
+          // patient, who by definition has no prior visit.
+          patientId={selected?.id}
           onClose={() => setPinOpen(false)}
           onApproved={(d) => {
             setDiscount(d);
@@ -650,13 +664,64 @@ export function ConsultationFlow({
   );
 }
 
+// ── Reduced revisit rate ─────────────────────────────────────────────────────
+// One line at the counter - what it is and which day of the run - with the whole
+// rate ladder one click away rather than spelled out in prose. The fee itself is
+// already on the summary below, so this doesn't repeat it.
+function RevisitRateNote({ preview }: { preview: ConsultationPreview }) {
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-xl border border-primary/30 bg-accent px-3.5 py-2.5">
+      <span className="text-sm font-semibold text-accent-foreground">
+        Revisit · day {preview.revisitDay} · reduced rate
+      </span>
+      <Popover>
+        <PopoverTrigger
+          aria-label="Show this doctor's revisit rates"
+          className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full text-accent-foreground/70 transition-colors hover:bg-primary/10 hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Info className="size-4" aria-hidden />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-64 p-0">
+          <p className="border-b px-3 py-2 text-xs font-semibold text-muted-foreground">
+            Revisit rates · {preview.doctorName}
+          </p>
+          <ul className="py-1">
+            {(preview.ladder ?? []).map((band, i) => (
+              <li
+                key={band.range}
+                aria-current={i === preview.currentBandIndex ? "true" : undefined}
+                className={cn(
+                  "flex items-center justify-between gap-3 px-3 py-1.5 text-sm",
+                  i === preview.currentBandIndex
+                    ? "bg-accent font-semibold text-accent-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                <span>{band.range}</span>
+                <span className="font-mono tabular-nums">
+                  {band.free ? "Free" : `₹${band.amount}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+            Counted from the first visit. After the last rate it is a new consultation.
+          </p>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 // ── PIN discount dialog ──────────────────────────────────────────────────────
 function PinDialog({
   doctorId,
+  patientId,
   onClose,
   onApproved,
 }: {
   doctorId: string;
+  patientId?: string;
   onClose: () => void;
   onApproved: (d: Discount) => void;
 }) {
@@ -678,6 +743,7 @@ function PinDialog({
     try {
       const res = await authorizeDiscountAction({
         doctorId,
+        patientId,
         pct: pct ?? undefined,
         amount: amount.trim() || undefined,
         pin,
@@ -811,7 +877,8 @@ function SuccessScreen({
   onReset: () => void;
   printable: boolean;
 }) {
-  const revisit = outcome.kind === "revisit";
+  const revisit = outcome.kind === "free-revisit";
+  const paidRevisit = outcome.kind === "paid-revisit";
   // A free revisit creates no bill - there's nothing to print (print plan §2b);
   // and no Print button at all unless a usable design exists (print-updates §1c).
   const canPrint = outcome.billId != null && printable;
@@ -857,12 +924,17 @@ function SuccessScreen({
             <Check className="size-7" aria-hidden />
           </div>
           <h1 className="text-xl font-bold text-foreground">
-            {revisit ? "Free revisit recorded" : "Consultation booked"}
+            {revisit ? "Free revisit recorded" : paidRevisit ? "Revisit booked" : "Consultation booked"}
           </h1>
           <p className="mt-1 text-sm text-accent-foreground">
             {revisit ? (
               <>
                 No charge - recorded under consultation <b>#{outcome.consultationId}</b>.
+              </>
+            ) : paidRevisit ? (
+              <>
+                Charged at the reduced revisit rate · consultation <b>#{outcome.consultationId}</b> ·
+                share the receipt with the patient.
               </>
             ) : (
               <>

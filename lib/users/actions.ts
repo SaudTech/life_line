@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireSession } from "@/lib/auth/dal";
 import { verifyCurrentPassword } from "@/lib/auth/authenticate";
+import { isSuperAdminUser, SUPER_ADMIN_LOCKED } from "@/lib/auth/super-admin-guard";
 import { hashPassword } from "@/lib/password";
 import { logActivity } from "@/lib/audit";
 import { zodFieldErrors } from "@/lib/forms/action-result";
@@ -161,6 +162,14 @@ export async function updateUserAction(input: unknown): Promise<ActionResult> {
   // Lock-out guard (plan D-C), computed from DB state. Demoting the last active
   // admin out of the admin role would leave zero active admins - refuse. Read the
   // full authz snapshot so we also have the CURRENT permissions to diff below.
+  // The break-glass account is not editable from here: its name, phone, role and
+  // password are declared in .env and re-asserted at every boot, so an edit made on
+  // this screen would be silently undone on the next restart - which is worse than
+  // refusing, because nobody would know when it reverted (lib/auth/super-admin.ts).
+  if (await isSuperAdminUser(v.id)) {
+    return { ok: false, formError: SUPER_ADMIN_LOCKED };
+  }
+
   const current = await getUserAuthz(v.id);
   if (!current) {
     return { ok: false, formError: "That user no longer exists." };
@@ -234,6 +243,13 @@ export async function resetPasswordAction(input: unknown): Promise<ActionResult>
     return { ok: false, fieldErrors: zodFieldErrors(parsed.error) };
   }
   const v = parsed.data;
+
+  // The super admin's password comes from .env and is re-asserted at every boot, so a
+  // reset here would work until the next restart and then silently revert - the worst
+  // kind of failure for a credential somebody is relying on in an emergency.
+  if (await isSuperAdminUser(v.id)) {
+    return { ok: false, formError: SUPER_ADMIN_LOCKED };
+  }
 
   await setUserPassword(v.id, await hashPassword(v.password));
   await logActivity({
@@ -326,6 +342,12 @@ export async function setActiveAction(input: unknown): Promise<ActionResult> {
   if (v.active === false) {
     if (v.id === s.sub) {
       return { ok: false, formError: "You can't deactivate your own account." };
+    }
+    // Deactivating the break-glass account defeats its entire purpose, and it would
+    // stay broken until somebody thought to restart the server - which is exactly the
+    // situation it exists to rescue. Refuse rather than rely on the boot repair.
+    if (await isSuperAdminUser(v.id)) {
+      return { ok: false, formError: SUPER_ADMIN_LOCKED };
     }
     const current = await getUserRoleActive(v.id);
     if (!current) {

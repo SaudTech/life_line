@@ -187,12 +187,23 @@ const END_DAY_FIELDS: FieldMeta[] = [
   // cash handed back where an advance exceeded the final bill. The sheet subtracts it
   // once (lib/reports/summary.ts); the label has to say which way the money went.
   labeled("refundsText", "Refunds paid (amount + count)", "400.00 (1)", "Less refunds paid"),
+  // The SECOND deduction in the money-in working, and the only outflow on the sheet
+  // that nothing else already accounts for - a refund is netted inside the bill it came
+  // from, but no bill knows a doctor was paid. "Less ..." for the same reason as
+  // refunds: the label has to say which way the money went. Not to be confused with
+  // "Doctor share" in Memoranda, which is what the day EARNED the doctors and is still
+  // sitting in the drawer.
+  labeled("doctorsPaidText", "Doctors paid (amount + consultations)", "5,564.00 (28)", "Less doctors paid"),
   labeled("activityTotalText", "Total actions", "19", "Actions"),
   { key: "modeTable", label: "By payment mode (table)", sample: "", kind: "table" },
   { key: "typeTable", label: "By bill type (table)", sample: "", kind: "table" },
   // Per-doctor share rows. Not in the seeded default (no room in its fixed A4
   // flow) - exposed so an admin can lay the per-doctor table into a custom design.
   { key: "doctorShareTable", label: "Doctor share by doctor (table)", sample: "", kind: "table" },
+  // Who was physically handed cash today, and for how many consultations. Same
+  // constraint as doctorShareTable - no room in the seeded default's fixed A4 flow, so
+  // it prints as one total there and this exists for a custom design that wants names.
+  { key: "doctorPaidTable", label: "Doctors paid by doctor (table)", sample: "", kind: "table" },
   { key: "advanceModeTable", label: "Admission deposits by mode (table)", sample: "", kind: "table" },
   { key: "activityTable", label: "Activity (table)", sample: "", kind: "table" },
 ];
@@ -286,6 +297,7 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
       advancesCountText: "1",
       moneyInText: "₹17,450.00",
       refundsText: "₹400.00 (1)",
+      doctorsPaidText: "₹1,600.00 (8)",
       activityTotalText: "19",
       modeRows: [
         { mode: "Cash", count: "11", amountText: "₹7,200.00" },
@@ -302,6 +314,7 @@ export function sampleBillDocument(type: BillType): AnyBillDocument {
         { doctor: "Dr. Anita Rao", count: "8", amountText: "₹1,600.00" },
         { doctor: "Dr. Suresh Kumar", count: "4", amountText: "₹800.00" },
       ],
+      doctorPaidRows: [{ doctor: "Dr. Anita Rao", count: "8", amountText: "₹1,600.00" }],
       advanceModeRows: [
         { mode: "Cash", count: "1", amountText: "₹5,000.00" },
         { mode: "Card", count: "0", amountText: "₹0.00" },
@@ -417,11 +430,15 @@ function endDayRaw(doc: EndDayDocument): Record<string, string> {
     advancesCountText: doc.advancesCountText,
     moneyInText: doc.moneyInText,
     refundsText: doc.refundsText,
+    doctorsPaidText: doc.doctorsPaidText,
     activityTotalText: doc.activityTotalText,
     modeTable: JSON.stringify(doc.modeRows.map((r) => [r.mode, r.count, r.amountText])),
     typeTable: JSON.stringify(doc.typeRows.map((r) => [r.label, r.count, r.amountText])),
     doctorShareTable: JSON.stringify(
       doc.doctorShareRows.map((r) => [r.doctor, r.count, r.amountText]),
+    ),
+    doctorPaidTable: JSON.stringify(
+      doc.doctorPaidRows.map((r) => [r.doctor, r.count, r.amountText]),
     ),
     advanceModeTable: JSON.stringify(
       doc.advanceModeRows.map((r) => [r.mode, r.count, r.amountText]),

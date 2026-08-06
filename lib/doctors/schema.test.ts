@@ -120,6 +120,77 @@ describe("newDoctorSchema", () => {
   it("rejects an unknown share type", () => {
     expect(firstErrorPath({ ...valid, doctorShareType: "lump_sum" })).toBe("doctorShareType");
   });
+
+  // The revisit ladder (migration 0027). The ladder RULE itself is tested in
+  // revisit-tiers.test.ts; these check the schema wires the form's rupee strings
+  // into it and reports back on the right row.
+  describe("revisit pricing", () => {
+    // ₹250.50 fee, free for 7 days, then ₹100 through day 9.
+    const tiers = [{ throughDay: 9, price: "100" }];
+
+    it("defaults to no priced bands", () => {
+      const r = newDoctorSchema.safeParse(valid);
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.revisitTiers).toEqual([]);
+    });
+
+    it("accepts a well-formed ladder", () => {
+      expect(newDoctorSchema.safeParse({ ...valid, revisitTiers: tiers }).success).toBe(true);
+    });
+
+    it("coerces numeric-string days", () => {
+      const r = newDoctorSchema.safeParse({
+        ...valid,
+        revisitTiers: [{ throughDay: "9", price: "100" }],
+      });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.revisitTiers[0].throughDay).toBe(9);
+    });
+
+    it("rejects a band inside the free window, on that band's row", () => {
+      expect(
+        firstErrorPath({ ...valid, revisitTiers: [{ throughDay: 7, price: "100" }] }),
+      ).toBe("revisitTiers.0.throughDay");
+    });
+
+    it("rejects a band priced at or above the consultation fee", () => {
+      expect(
+        firstErrorPath({ ...valid, revisitTiers: [{ throughDay: 9, price: "250.50" }] }),
+      ).toBe("revisitTiers.0.price");
+    });
+
+    it("rejects a malformed price", () => {
+      expect(
+        firstErrorPath({ ...valid, revisitTiers: [{ throughDay: 9, price: "abc" }] }),
+      ).toBe("revisitTiers.0.price");
+    });
+
+    it("rejects bands typed out of order, on the row that breaks the run", () => {
+      // Rows are checked as the admin sees them: row 1 ending on day 9 after a
+      // row that already ran through day 12 covers no days at all.
+      expect(
+        firstErrorPath({
+          ...valid,
+          revisitTiers: [
+            { throughDay: 12, price: "150" },
+            { throughDay: 9, price: "100" },
+          ],
+        }),
+      ).toBe("revisitTiers.1.throughDay");
+    });
+
+    it("rejects two bands ending on the same day", () => {
+      expect(
+        firstErrorPath({
+          ...valid,
+          revisitTiers: [
+            { throughDay: 9, price: "100" },
+            { throughDay: 9, price: "120" },
+          ],
+        }),
+      ).toBe("revisitTiers.1.throughDay");
+    });
+  });
 });
 
 describe("updateDoctorSchema", () => {

@@ -4,6 +4,7 @@ import {
   emptyMoneyRaw,
   emptyDocumentComplianceRaw,
   BILL_TYPES,
+  type DoctorPayoutRow,
   type DoctorShareRow,
   type MoneyRaw,
   type PendingDocumentRow,
@@ -274,6 +275,134 @@ describe("shapeDailyReport money-in reconciliation", () => {
     const r = shapeDailyReport([], emptyMoneyRaw());
     expect(r.moneyInTotalPaise).toBe(0);
     expect(r.refunds).toEqual({ count: 0, totalPaise: 0 });
+  });
+});
+
+// Doctor payouts (migration 0026) - cash handed to a doctor for their consultations.
+// The bug these defend is the one the payout feature created: the day sheet counted
+// every rupee taken but nothing that left with a doctor, so a counter told to hold
+// ₹1,20,648 was physically ₹5,564 short and had no line to explain it.
+//
+// THE DISTINCTION THAT MATTERS, and the one that is easy to get wrong: the doctors'
+// SHARE and the doctors' PAYOUT are different quantities. The share is what the day's
+// consultations earned them and is still in the drawer; the payout is notes in hand.
+// Subtracting both takes the same rupees out twice, so these tests pin that the share
+// still moves nothing.
+describe("shapeDailyReport doctor payouts", () => {
+  const paid = (over: Partial<DoctorPayoutRow> = {}): DoctorPayoutRow => ({
+    doctorId: "1",
+    doctorName: "Dr. Anita Rao",
+    count: 28,
+    paise: 556400,
+    ...over,
+  });
+
+  // The accrual half, for the tests that pin share and payout apart.
+  const share = (over: Partial<DoctorShareRow>): DoctorShareRow => ({
+    doctorId: "1",
+    doctorName: "Dr. Anita Rao",
+    shareType: "percentage",
+    sharePercentage: 40,
+    shareFlatPaise: 0,
+    count: 1,
+    sharePaise: 0,
+    ...over,
+  });
+
+  it("subtracts cash handed to doctors from the drawer total", () => {
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByMode: [{ key: "cash", count: 10, totalPaise: 8609800 }],
+      doctorPayouts: [paid()],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.collectedTotalPaise).toBe(8609800); // gross - what was taken
+    expect(r.doctorPayoutTotalPaise).toBe(556400);
+    expect(r.doctorPayoutCount).toBe(28);
+    expect(r.moneyInTotalPaise).toBe(8053400); // 86,098 in, 5,564 out
+  });
+
+  it("names every doctor paid, with the consultations each payout covered", () => {
+    // "Which doctor, for how many" is the first question asked when a till is short,
+    // so the rows reach the sheet rather than collapsing into one figure.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      doctorPayouts: [
+        paid({ count: 28, paise: 556400 }),
+        paid({ doctorId: "2", doctorName: "Dr. Priya Nair", count: 37, paise: 370000 }),
+      ],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.doctorPayouts.map((p) => p.doctorName)).toEqual([
+      "Dr. Anita Rao",
+      "Dr. Priya Nair",
+    ]);
+    expect(r.doctorPayoutTotalPaise).toBe(926400);
+    expect(r.doctorPayoutCount).toBe(65);
+  });
+
+  it("the doctors' SHARE still moves nothing - only the payout is cash", () => {
+    // ₹10,000 of consultations, ₹4,000 owed to the doctor, and nothing settled yet.
+    // Every rupee is still in the drawer, so money in is the full ₹10,000. Deducting
+    // the share here would make the sheet ask for less cash than is physically there.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "consultation", count: 4, totalPaise: 1000000 }],
+      billsByMode: [{ key: "cash", count: 4, totalPaise: 1000000 }],
+      doctorShares: [share({ doctorId: "1", count: 4, sharePaise: 400000 })],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.doctorShareTotalPaise).toBe(400000);
+    expect(r.doctorPayoutTotalPaise).toBe(0);
+    expect(r.moneyInTotalPaise).toBe(1000000);
+  });
+
+  it("a share and a payout on the same day deduct ONCE, not twice", () => {
+    // The double-count this whole distinction exists to prevent. Same ₹4,000: accrued
+    // as a share, then handed over. Money in drops by 4,000 - never 8,000.
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByType: [{ key: "consultation", count: 4, totalPaise: 1000000 }],
+      billsByMode: [{ key: "cash", count: 4, totalPaise: 1000000 }],
+      doctorShares: [share({ doctorId: "1", count: 4, sharePaise: 400000 })],
+      doctorPayouts: [paid({ count: 4, paise: 400000 })],
+    };
+    const r = shapeDailyReport([], money);
+
+    expect(r.hospitalShareTotalPaise).toBe(600000); // accrual, unchanged
+    expect(r.moneyInTotalPaise).toBe(600000); // 10,000 in − 4,000 out
+  });
+
+  it("stacks with refunds - both outflows come off, each exactly once", () => {
+    const money: MoneyRaw = {
+      ...emptyMoneyRaw(),
+      billsByMode: [{ key: "cash", count: 12, totalPaise: 8609800 }],
+      advancesByMode: [{ key: "cash", count: 3, totalPaise: 4500000 }],
+      refunds: { count: 2, totalPaise: 1045000 },
+      doctorPayouts: [paid()],
+    };
+    const r = shapeDailyReport([], money);
+
+    // 86,098 + 45,000 − 10,450 − 5,564 = 1,15,084
+    expect(r.moneyInTotalPaise).toBe(11508400);
+  });
+
+  it("a day whose ONLY event was paying a doctor is not empty", () => {
+    // Real cash left the drawer. A sheet claiming "nothing happened" would hide the
+    // exact movement it exists to explain (§4).
+    const r = shapeDailyReport([], { ...emptyMoneyRaw(), doctorPayouts: [paid()] });
+    expect(r.isEmpty).toBe(false);
+    expect(r.moneyInTotalPaise).toBe(-556400);
+  });
+
+  it("an empty day reports no payouts at all", () => {
+    const r = shapeDailyReport([], emptyMoneyRaw());
+    expect(r.doctorPayouts).toEqual([]);
+    expect(r.doctorPayoutTotalPaise).toBe(0);
+    expect(r.doctorPayoutCount).toBe(0);
   });
 });
 

@@ -4,7 +4,11 @@ import {
   clinicDateLabel,
   clinicHour,
   clinicToday,
+  dayWindow,
+  isValidClinicTime,
   presetRange,
+  rangeWindow,
+  shiftWindow,
 } from "./date-range";
 
 // These pin the clinic clock to Asia/Kolkata regardless of where the process runs.
@@ -134,5 +138,102 @@ describe("clinicToday", () => {
   it("uses the Asia/Kolkata calendar day (ahead of UTC late evening)", () => {
     // 2026-07-09T20:00Z is 2026-07-10 01:30 in IST (UTC+5:30).
     expect(clinicToday(new Date("2026-07-09T20:00:00Z"))).toBe("2026-07-10");
+  });
+});
+
+// The instant windows the doctor-earnings report is built on. A day sheet can be
+// reckoned in whole dates; a doctor's 12:00-14:00 shift cannot, and doctors are paid
+// per shift. Every window here is HALF-OPEN [from, to) so consecutive windows tile
+// exactly - no bill counted twice, none falling through a gap.
+describe("dayWindow", () => {
+  it("runs from midnight to the NEXT day's midnight, exclusive", () => {
+    // Not "23:59": a bill written at 23:59:30 is real money and must land inside
+    // the day it was taken.
+    expect(dayWindow("2026-08-06")).toEqual({
+      from: "2026-08-06 00:00",
+      to: "2026-08-07 00:00",
+    });
+  });
+
+  it("rolls the upper end across a month boundary", () => {
+    expect(dayWindow("2026-08-31")).toEqual({
+      from: "2026-08-31 00:00",
+      to: "2026-09-01 00:00",
+    });
+  });
+
+  it("consecutive days tile with no gap and no overlap", () => {
+    expect(dayWindow("2026-08-06").to).toBe(dayWindow("2026-08-07").from);
+  });
+});
+
+describe("rangeWindow", () => {
+  it("covers the whole inclusive day range, ending at the day after `to`", () => {
+    expect(rangeWindow({ dateFrom: "2026-08-03", dateTo: "2026-08-06" })).toEqual({
+      from: "2026-08-03 00:00",
+      to: "2026-08-07 00:00",
+    });
+  });
+
+  it("a single-day range is exactly that day's window", () => {
+    expect(rangeWindow({ dateFrom: "2026-08-06", dateTo: "2026-08-06" })).toEqual(
+      dayWindow("2026-08-06"),
+    );
+  });
+});
+
+describe("shiftWindow", () => {
+  it("slices a shift out of one day, end exclusive", () => {
+    // The stated case: a doctor works 12:00-14:00, then 18:00-20:00. Two windows,
+    // and the 14:00 boundary belongs to neither morning nor evening twice.
+    expect(shiftWindow("2026-08-06", "12:00", "14:00")).toEqual({
+      from: "2026-08-06 12:00",
+      to: "2026-08-06 14:00",
+    });
+    expect(shiftWindow("2026-08-06", "18:00", "20:00")).toEqual({
+      from: "2026-08-06 18:00",
+      to: "2026-08-06 20:00",
+    });
+  });
+
+  it("back-to-back shifts tile exactly", () => {
+    expect(shiftWindow("2026-08-06", "12:00", "14:00").to).toBe(
+      shiftWindow("2026-08-06", "14:00", "18:00").from,
+    );
+  });
+
+  it("an end before the start crosses midnight into the next day", () => {
+    // A night shift is one window, not an empty one.
+    expect(shiftWindow("2026-08-06", "22:00", "02:00")).toEqual({
+      from: "2026-08-06 22:00",
+      to: "2026-08-07 02:00",
+    });
+  });
+
+  it("00:00 to 00:00 is the whole day, not nothing", () => {
+    expect(shiftWindow("2026-08-06", "00:00", "00:00")).toEqual(dayWindow("2026-08-06"));
+  });
+
+  it("rejects a malformed time rather than building a window that reads empty", () => {
+    expect(() => shiftWindow("2026-08-06", "24:00", "02:00")).toThrow();
+    expect(() => shiftWindow("2026-08-06", "12:60", "14:00")).toThrow();
+    expect(() => shiftWindow("2026-08-06", "9:00", "14:00")).toThrow();
+    expect(() => shiftWindow("2026-08-06", "", "14:00")).toThrow();
+  });
+});
+
+describe("isValidClinicTime", () => {
+  it("accepts a zero-padded 24-hour time", () => {
+    expect(isValidClinicTime("00:00")).toBe(true);
+    expect(isValidClinicTime("23:59")).toBe(true);
+    expect(isValidClinicTime("09:05")).toBe(true);
+  });
+
+  it("rejects anything else", () => {
+    expect(isValidClinicTime("24:00")).toBe(false);
+    expect(isValidClinicTime("12:60")).toBe(false);
+    expect(isValidClinicTime("9:00")).toBe(false);
+    expect(isValidClinicTime("12:00:00")).toBe(false);
+    expect(isValidClinicTime("noon")).toBe(false);
   });
 });

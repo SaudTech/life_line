@@ -44,8 +44,11 @@ export function DoctorRow(props: DoctorCardProps) {
         ₹{formatPaise(doctor.fee_paise)}
       </div>
 
-      <div className="hidden w-[90px] shrink-0 text-xs text-muted-foreground lg:block">
-        {doctor.revisit_validity_days} {doctor.revisit_validity_days === 1 ? "day" : "days"}
+      <div
+        className="hidden w-[215px] shrink-0 truncate text-xs text-muted-foreground lg:block"
+        title={d.revisit}
+      >
+        {d.revisit}
       </div>
 
       <div className="w-[104px] shrink-0">

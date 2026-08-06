@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { authenticateUser } from "./authenticate";
 import { getSession, homePathForRole } from "./dal";
 import { logActivity } from "@/lib/audit";
+import { shouldLogSignIn } from "@/lib/activity/sign-in-policy";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -54,13 +55,20 @@ export async function loginAction(input: unknown): Promise<ActionResult> {
   // Record the successful sign-in in the activity log. Best-effort (logActivity
   // swallows its own errors) and, crucially, BEFORE redirect() - which throws to
   // unwind, so nothing after it runs. The actor is also the target of the event.
-  await logActivity({
-    actorId: result.user.id,
-    action: "auth.sign_in",
-    entity: "user",
-    targetId: result.user.id,
-    locationId: result.user.location_id,
-  });
+  //
+  // Admins are exempt (shouldLogSignIn): they are the only readers of the feed and
+  // sign in constantly to check it, so logging that would bury the counter events
+  // the feed exists to surface. Suppressed HERE, at the write, because audit_log is
+  // append-only (§4/§8) - filtering on read would leave the rows in the table.
+  if (shouldLogSignIn(result.user.role)) {
+    await logActivity({
+      actorId: result.user.id,
+      action: "auth.sign_in",
+      entity: "user",
+      targetId: result.user.id,
+      locationId: result.user.location_id,
+    });
+  }
 
   // redirect() throws to unwind - must be outside any try/catch above. Each role
   // lands on its own home.

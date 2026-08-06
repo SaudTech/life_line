@@ -1,6 +1,5 @@
 import { pool } from "@/lib/db";
-import { doctorShareSql } from "@/lib/doctors/share";
-import { CLINIC_TZ, billCollectedSql, billMoneyInSql, clinicRange, toPaise } from "@/lib/money-in";
+import { CLINIC_TZ, billMoneyInSql, clinicRange, toPaise } from "@/lib/money-in";
 import type { MovementKind, MovementStatus } from "./ledger";
 import type { DayPoint, DepartmentRow } from "./summary";
 
@@ -82,21 +81,24 @@ export async function getFirstRevenueDay(locationId: string): Promise<string | n
 
 // The doctors' summed cut of consultation money for a clinic-day range - the same
 // per-bill rule the daily report uses (lib/doctors/share.ts), priced on what each
-// bill collected at each doctor's CURRENT rate (nothing is snapshotted, so editing
-// a rate re-prices history - intended for a payout figure). Shown as a DEDUCTION
-// from gross revenue (hospital net = revenue − this); it is never part of money-in
-// itself, because the cut is still in the drawer and settled with doctors later.
-// A legacy consultation bill with no consultation link contributes no share.
+// bill's FROZEN share (bills.doctor_share_paise, migration 0025) - the rate that
+// applied when the bill was written, so editing a doctor's rate today never
+// restates a past day. Shown as a DEDUCTION from gross revenue (hospital net =
+// revenue − this); it is never part of money-in itself, because the cut is still in
+// the drawer and settled with doctors later.
+//
+// No join is needed any more: the share lives on the bill. A legacy consultation
+// bill with no consultation link still contributes nothing - 0025 could only
+// backfill rows that reach a doctor, so it keeps the column's 0 default, exactly
+// as it used to drop out of the join. The total is unchanged by this migration.
 export async function getDoctorShareTotal(
   fromDay: string,
   toDay: string,
   locationId: string,
 ): Promise<number> {
   const { rows } = await pool.query<{ paise: string }>(
-    `SELECT COALESCE(sum(${doctorShareSql(billCollectedSql("b"), "d")}), 0)::bigint AS paise
+    `SELECT COALESCE(sum(b.doctor_share_paise), 0)::bigint AS paise
        FROM bills b
-       JOIN consultations c ON c.id = b.consultation_id
-       JOIN doctors d ON d.id = c.doctor_id
       WHERE b.location_id = $3 AND b.status = 'final' AND b.type = 'consultation'
         AND ${clinicRange("b.created_at", 1, 2)}`,
     [fromDay, toDay, locationId],

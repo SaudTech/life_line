@@ -99,6 +99,11 @@ export interface EndDayDocument {
   // close. grandTotalText is bills ONLY, so the two differ on any day with an admission.
   moneyInText: string;
   refundsText: string; // "400.00 (1)" - cash handed back at discharge + count
+  // Cash handed to doctors on this day (migration 0026) - a SECOND deduction in the
+  // money-in working, and the only outflow nothing else on the sheet accounts for.
+  // Not to be confused with doctorShareText above, which is what the day earned them
+  // and is still in the drawer.
+  doctorsPaidText: string; // "5,564.00 (28)" - amount handed over + consultations covered
   activityTotalText: string; // "19" - total logged actions on the day
   // Repeating rows for the designer's `table` fields (mode / type / deposits / activity).
   modeRows: { mode: string; count: string; amountText: string }[];
@@ -108,6 +113,11 @@ export interface EndDayDocument {
   // catalog exposes this so an admin can lay the per-doctor table into a custom
   // design - the on-screen sheet shows these same rows.
   doctorShareRows: { doctor: string; count: string; amountText: string }[];
+  // Per-doctor PAYOUT rows - who was physically handed cash today, and for how many
+  // consultations. The seeded default prints the total on its own deduction line (the
+  // fixed A4 flow has no room for an unbounded table, the same constraint that keeps
+  // doctorShareRows off it); the catalog exposes this so a custom design can name them.
+  doctorPaidRows: { doctor: string; count: string; amountText: string }[];
   // Admission deposits split by payment mode. advancesText is only the TOTAL, and a
   // total is not enough to count a drawer: cash deposits are physically in the till
   // while card/UPI deposits are not, so the split has to reach paper too - the

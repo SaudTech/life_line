@@ -50,6 +50,17 @@ export function addDays(day: IsoDay, days: number): IsoDay {
   return toIsoDay(new Date(ms));
 }
 
+// Whole calendar days from `from` to `to` - negative if `to` is earlier. This is
+// the "days elapsed" the revisit taper counts in (lib/doctors/revisit-tiers.ts):
+// the consultation day itself is 0. UTC math again, so no zone can shift it.
+export function daysBetween(from: IsoDay, to: IsoDay): number {
+  assertIsoDay(from);
+  assertIsoDay(to);
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+}
+
 // The last day a consultation covers: startDay + the doctor's validity days.
 // validityDays === 0 means the consultation only covers its own day (valid_until
 // === startDay), so a same-day revisit is free but the next day is not.

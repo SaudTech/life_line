@@ -11,6 +11,12 @@ export interface NavItem {
 
 // Every item points at a real, shipped route - the bar never renders a link to a
 // page that doesn't exist. Add an item here only once its route lands.
+//
+// "Doctor Earnings" is on EVERY role, deliberately. It is the one report whose
+// subject is a doctor rather than a staff member, and it is pulled at the counter
+// with the doctor standing there - so whichever desk user is on shift has to be able
+// to produce it. Access is enforced server-side in the action (location-scoped, like
+// everything else); this list only decides what is linked.
 export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   admin: [
     { href: "/admin", label: "Dashboard" },
@@ -22,6 +28,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/procedures", label: "Procedures" },
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "Reports" },
+    { href: "/doctor-earnings", label: "Doctor Earnings" },
     { href: "/admin/receipts", label: "Receipt Templates" },
     { href: "/admin/suggestions", label: "Suggestions" },
   ],
@@ -34,6 +41,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/procedures", label: "Procedures" },
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "My Day" },
+    { href: "/doctor-earnings", label: "Doctor Earnings" },
   ],
   // OP-only desk does outpatient billing but not consultations intake here.
   // Procedures is a plain counter-ROLE capability (op_desk / op_ip_desk / admin):
@@ -49,6 +57,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/consultations/history", label: "OPD" },
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "My Day" },
+    { href: "/doctor-earnings", label: "Doctor Earnings" },
   ],
   // OP+IN desk also starts consultations (admin + this role only).
   op_ip_desk: [
@@ -57,6 +66,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/procedures", label: "Procedures" },
     { href: "/admissions", label: "IPD" },
     { href: "/reports", label: "My Day" },
+    { href: "/doctor-earnings", label: "Doctor Earnings" },
   ],
 };
 

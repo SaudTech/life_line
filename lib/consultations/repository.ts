@@ -1,4 +1,5 @@
 import { pool } from "@/lib/db";
+import type { DoctorShareSnapshot } from "@/lib/doctors/share";
 import type { IsoDay } from "./rules";
 
 // Data access for consultations + their visits (PROJECT_OVERVIEW §Consultation).
@@ -28,13 +29,23 @@ export interface ConsultationRow {
 export async function findLatestConsultationForDoctor(
   patientId: string,
   doctorId: string,
-): Promise<{ id: string; doctor_id: string; valid_until: IsoDay } | null> {
+): Promise<{
+  id: string;
+  doctor_id: string;
+  valid_until: IsoDay;
+  // The day this run of visits began (migration 0028) - what the revisit taper is
+  // measured from, carried forward unchanged by every paid revisit in the run.
+  series_started_on: IsoDay;
+} | null> {
   const { rows } = await pool.query<{
     id: string;
     doctor_id: string;
     valid_until: IsoDay;
+    series_started_on: IsoDay;
   }>(
-    `SELECT id, doctor_id, to_char(valid_until, 'YYYY-MM-DD') AS valid_until
+    `SELECT id, doctor_id,
+            to_char(valid_until, 'YYYY-MM-DD') AS valid_until,
+            to_char(series_started_on, 'YYYY-MM-DD') AS series_started_on
        FROM consultations
       WHERE patient_id = $1
         AND doctor_id = $2
@@ -52,6 +63,12 @@ export interface CreateConsultationInput {
   doctorId: string;
   feeChargedPaise: number; // the doctor's base fee, copied by the action
   validUntil: IsoDay; // computed by the pure rule
+  // The day this run of visits began (migration 0028). Today for a fresh
+  // consultation; the PREVIOUS row's anchor when this is a paid revisit, so the
+  // taper keeps counting from the first visit instead of restarting.
+  seriesStartedOn: IsoDay;
+  // The consultation this one continues, when it is a paid revisit. Null otherwise.
+  revisitOfConsultationId: string | null;
   reason: string | null;
   locationId: string;
   // Bill (the money record for this consultation) - amounts are integer paise,
@@ -62,6 +79,11 @@ export interface CreateConsultationInput {
   paymentMode: PaymentMode;
   discountApprovedBy: string | null; // supervisor/admin user id, or null
   createdBy: string; // acting user id
+  // The doctor's cut, FROZEN at this moment by the pure rule (snapshotDoctorShare,
+  // migration 0025). Priced on totalPaise, so a discount approved at the counter is
+  // already in it. Stored, never recomputed - a rate edited tomorrow must not
+  // rewrite a payout slip printed and paid out today.
+  doctorShare: DoctorShareSnapshot;
   // Set when this consultation is a RE-ISSUE correcting a voided bill (plan
   // §Part B): the id of that voided bill, linked to this new one in the SAME
   // transaction. Null for a normal consultation.
@@ -70,8 +92,13 @@ export interface CreateConsultationInput {
 
 // Create a new consultation, its first visit, AND its consultation bill - all or
 // nothing in one transaction. The bill gets its DB-issued bill_number (the token
-// shown to the patient). Returns the ids and that number, plus whether a
-// re-issue link was established (only a voided, not-yet-replaced source links).
+// shown to the patient) and the doctor's frozen share. Returns the ids and that
+// number, plus whether a re-issue link was established (only a voided,
+// not-yet-replaced source links).
+//
+// This transaction is the ONE moment a consultation's doctor share is priced: the
+// bill is written 'final' here, so intake, finalize and the discount are the same
+// instant, and there is no later step at which the amount could still move.
 export async function createConsultationWithBill(
   input: CreateConsultationInput,
 ): Promise<{ consultationId: string; billId: string; billNumber: string; replacedBillId: string | null }> {
@@ -80,8 +107,9 @@ export async function createConsultationWithBill(
     await client.query("BEGIN");
     const cons = await client.query<{ id: string }>(
       `INSERT INTO consultations
-         (patient_id, doctor_id, fee_charged_paise, valid_until, reason, location_id)
-       VALUES ($1, $2, $3, $4::date, $5, $6)
+         (patient_id, doctor_id, fee_charged_paise, valid_until, reason, location_id,
+          series_started_on, revisit_of_consultation_id)
+       VALUES ($1, $2, $3, $4::date, $5, $6, $7::date, $8)
        RETURNING id`,
       [
         input.patientId,
@@ -90,6 +118,8 @@ export async function createConsultationWithBill(
         input.validUntil,
         input.reason,
         input.locationId,
+        input.seriesStartedOn,
+        input.revisitOfConsultationId,
       ],
     );
     const consultationId = cons.rows[0].id;
@@ -102,8 +132,9 @@ export async function createConsultationWithBill(
     const bill = await client.query<{ id: string; bill_number: string }>(
       `INSERT INTO bills
          (patient_id, type, consultation_id, subtotal_paise, discount_paise, total_paise,
-          status, payment_mode, discount_approved_by, created_by, location_id)
-       VALUES ($1, 'consultation', $2, $3, $4, $5, 'final', $6, $7, $8, $9)
+          status, payment_mode, discount_approved_by, created_by, location_id,
+          doctor_share_paise, doctor_share_type, doctor_share_percentage, doctor_share_flat_paise)
+       VALUES ($1, 'consultation', $2, $3, $4, $5, 'final', $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id, bill_number`,
       [
         input.patientId,
@@ -115,6 +146,10 @@ export async function createConsultationWithBill(
         input.discountApprovedBy,
         input.createdBy,
         input.locationId,
+        input.doctorShare.sharePaise,
+        input.doctorShare.shareType,
+        input.doctorShare.sharePercentage,
+        input.doctorShare.shareFlatPaise,
       ],
     );
     // Re-issue link (plan §Part B): point the voided source bill at this new one,

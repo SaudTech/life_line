@@ -94,7 +94,7 @@ export function DoctorsManager({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Doctors</h1>
           <p className="mt-1 text-sm font-medium text-muted-foreground">
-            Consultation fees and revisit validity for every doctor.
+            Consultation fees and revisit pricing for every doctor.
           </p>
         </div>
         <Button type="button" onClick={() => setDialog({ type: "add", doctorId: null })}>

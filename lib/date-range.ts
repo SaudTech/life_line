@@ -95,6 +95,58 @@ export function presetRange(
   }
 }
 
+// ── Instant windows (the axis a shift needs) ──────────────────────────────────
+// A window of clinic WALL-CLOCK time, half-open [from, to). Both ends are
+// 'YYYY-MM-DD HH:MM' strings in the clinic's timezone, ready to hand to
+// clinicInstantWindows (lib/money-in.ts) as query parameters.
+//
+// This is deliberately the shape the doctor-earnings query takes even though the
+// screen only asks for whole days today: a date cannot express "12:00 to 14:00",
+// so a report built on dates has to be rewritten the day shifts arrive. Built on
+// instants from the start, a shift is a different pair of strings and nothing else.
+export interface InstantWindow {
+  from: string; // inclusive, 'YYYY-MM-DD HH:MM' clinic wall-clock
+  to: string; // EXCLUSIVE, same format
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+export function isValidClinicTime(hhmm: string): boolean {
+  return TIME_RE.test(hhmm);
+}
+
+// A whole clinic day as an instant window: [day 00:00, next day 00:00). The
+// exclusive upper end is the NEXT day's midnight, never "23:59" - a bill written in
+// the last minute of the day is money that must land somewhere, and 23:59:30 falls
+// outside a window that stops at 23:59.
+export function dayWindow(day: string): InstantWindow {
+  return { from: `${day} 00:00`, to: `${addDays(day, 1)} 00:00` };
+}
+
+// An inclusive range of clinic days as one window: [from 00:00, to+1 00:00). Same
+// half-open discipline, so it tiles with dayWindow without gaps or overlaps.
+export function rangeWindow(range: DateRange): InstantWindow {
+  return { from: `${range.dateFrom} 00:00`, to: `${addDays(range.dateTo, 1)} 00:00` };
+}
+
+// An arbitrary time slice of one clinic day - the shift case. `startTime` is
+// inclusive and `endTime` exclusive, both 'HH:MM'.
+//
+// An end at or before the start is read as crossing midnight into the NEXT day, so
+// a late shift ("22:00 to 02:00") is one window rather than an empty one. "00:00 to
+// 00:00" is therefore the whole day, which is the only reading that isn't a
+// silently empty report.
+export function shiftWindow(day: string, startTime: string, endTime: string): InstantWindow {
+  if (!isValidClinicTime(startTime) || !isValidClinicTime(endTime)) {
+    throw new Error(`Invalid clinic time: ${startTime} / ${endTime}`);
+  }
+  const crossesMidnight = endTime <= startTime;
+  return {
+    from: `${day} ${startTime}`,
+    to: `${crossesMidnight ? addDays(day, 1) : day} ${endTime}`,
+  };
+}
+
 export const PRESET_LABELS: Record<DatePreset, string> = {
   today: "Today",
   yesterday: "Yesterday",

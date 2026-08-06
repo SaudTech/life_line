@@ -14,6 +14,7 @@ import {
   updateDoctorSchema,
   setDoctorActiveSchema,
 } from "./schema";
+import { sortRevisitTiers } from "./revisit-tiers";
 import { createDoctor, updateDoctor, setDoctorActive } from "./repository";
 
 // Department is free TEXT on the doctors row (no FK - migration 0016/0020), so
@@ -41,6 +42,16 @@ async function resolveConsultationTemplate(
     return { error: "Pick a consultation design." };
   }
   return { value: raw };
+}
+
+// The priced revisit bands, converted to integer paise and put in day order -
+// the order resolveRevisitCharge relies on and the order the list reads back.
+// The schema has already proved the ladder is sound (bands increase, clear the
+// free window, stay under the fee), so this only converts.
+function resolveRevisitTiers(rows: { throughDay: number; price: string }[]) {
+  return sortRevisitTiers(
+    rows.map((t) => ({ throughDay: t.throughDay, pricePaise: rupeesToPaise(t.price) })),
+  ).map((t) => ({ through_day: t.throughDay, price_paise: t.pricePaise }));
 }
 
 // Split the form's single percent-OR-flat share field into the two DB columns
@@ -104,6 +115,7 @@ export async function createDoctorAction(
     status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
+    revisit_tiers: resolveRevisitTiers(v.revisitTiers),
     ...resolveDoctorShare(v),
     consultation_template_id: template.value,
     location_id: locationId,
@@ -154,6 +166,7 @@ export async function updateDoctorAction(input: unknown): Promise<ActionResult> 
     status: v.status,
     fee_paise: rupeesToPaise(v.fee),
     revisit_validity_days: v.revisitValidityDays,
+    revisit_tiers: resolveRevisitTiers(v.revisitTiers),
     ...resolveDoctorShare(v),
     consultation_template_id: template.value,
   });

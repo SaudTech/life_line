@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { DayStepper } from "@/components/day-stepper";
 import { printEndDay } from "@/components/print-end-day";
+import { describeShareRate } from "@/lib/doctors/share";
 import { formatPaise } from "@/lib/money";
 import { roleTitle } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -183,14 +184,27 @@ function Line({
   );
 }
 
-// The doctor's rate, compact, for "(40%)" / "(₹500.00)" beside the name: a
-// payout figure with no visible rate invites an argument at settlement time.
-// The rate shown is the doctor's CURRENT configuration (the share rule prices
-// at report time - lib/doctors/share.ts), exactly what the figure was computed
-// with. Kept to a parenthesis so a many-doctor day still reads as one compact
-// row per doctor.
-function shareRate(d: DoctorShareRow): string {
-  return d.shareType === "flat" ? `₹${formatPaise(d.shareFlatPaise)}` : `${d.sharePercentage}%`;
+// The doctor's rate beside their name, from the ONE wording rule
+// (describeShareRate) so this sheet and the doctor-earnings sheet can never word
+// the same rate differently. A payout figure with no visible rate invites an
+// argument at settlement time.
+//
+// The rate is the one FROZEN onto those bills (migration 0025), not the doctor's
+// configuration today - it is exactly what the figure beside it was computed with,
+// which is the whole point of showing it. A doctor whose rate changed mid-day
+// therefore appears once per rate.
+//
+// Legacy bills from before 0025 carry an amount but no recorded rate; those read
+// "rate not recorded" rather than being given a rate they never had.
+function shareRateLabel(d: DoctorShareRow): string {
+  return describeShareRate(d, formatPaise) ?? "rate not recorded";
+}
+
+// A doctor can now contribute SEVERAL rows in one window (one per rate they were
+// billed at), so the row key has to carry the rate too - keyed on doctorId alone,
+// React would drop every row after the first.
+function shareRowKey(d: DoctorShareRow): string {
+  return `share-${d.doctorId}-${d.shareType ?? "none"}-${d.sharePercentage ?? ""}-${d.shareFlatPaise ?? ""}`;
 }
 
 // How many pending records are listed by name before collapsing to "+N more" -
@@ -540,15 +554,20 @@ export function DailyReportView({
                           remainder. All shaper-computed. INFORMATIONAL: these rows
                           decompose the Consultation figure above - they are NOT extra
                           items, so Total collected does not sum them, and the doctors'
-                          cut (still in the drawer, settled with the doctor later)
-                          never touches Money in below. */}
+                          cut never touches Money in below.
+
+                          This is what the day EARNED the doctors, not what they were
+                          handed: the cash is still in the drawer until somebody settles
+                          it on /doctor-earnings, and that settlement appears as its own
+                          "Doctors paid" deduction in the money-in working. Subtracting
+                          this figure as well would take the same rupees out twice. */}
                       {l.key === "consultation" && report.doctorShares.length > 0
                         ? [
                             ...report.doctorShares.map((d) => (
                               <Line
-                                key={`share-${d.doctorId}`}
+                                key={shareRowKey(d)}
                                 indent
-                                label={`${d.doctorName} (${shareRate(d)})`}
+                                label={`${d.doctorName} (${shareRateLabel(d)})`}
                                 countLabel={`${d.count} ${d.count === 1 ? "consultation" : "consultations"}`}
                                 paise={-d.sharePaise}
                               />
@@ -693,6 +712,39 @@ export function DailyReportView({
                       muted={false}
                     />
                   ) : null}
+                  {/* Doctors paid. The one outflow nothing else on this sheet knows
+                      about: a refund is already netted inside the bill it came from,
+                      but no bill records a payout, so before this line the sheet asked
+                      the counter to produce cash that had physically left hours
+                      earlier. Do NOT confuse it with the doctors' cut under
+                      Collections above - that money is still in the drawer.
+
+                      The per-doctor rows are indented BREAKDOWN, not extra items: the
+                      parent line already carries the whole deduction, exactly like the
+                      consultation split decomposes its own parent. "Which doctor, for
+                      how many consultations" is the first question asked when a till
+                      is short, so the sheet answers it by name. */}
+                  {report.doctorPayouts.length > 0
+                    ? [
+                        <Line
+                          key="doctors-paid"
+                          label="Doctors paid"
+                          hint="Cash handed to doctors for their consultations - it has left the drawer."
+                          countLabel={`${report.doctorPayoutCount} ${report.doctorPayoutCount === 1 ? "consultation" : "consultations"}`}
+                          paise={-report.doctorPayoutTotalPaise}
+                          muted={false}
+                        />,
+                        ...report.doctorPayouts.map((p) => (
+                          <Line
+                            key={`paid-${p.doctorId}`}
+                            indent
+                            label={p.doctorName}
+                            countLabel={`${p.count} ${p.count === 1 ? "consultation" : "consultations"}`}
+                            paise={-p.paise}
+                          />
+                        )),
+                      ]
+                    : null}
                 </Ledger>
 
                 <div className="mt-1 border-t-4 border-double border-foreground/80 pt-3">
@@ -702,7 +754,9 @@ export function DailyReportView({
                         Money in
                       </span>
                       <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
-                        This is the figure to reconcile against the drawer at close.
+                        {report.doctorPayouts.length > 0
+                          ? "Taken in, less what was handed back and paid to doctors. Reconcile the drawer against this."
+                          : "This is the figure to reconcile against the drawer at close."}
                       </p>
                     </div>
                     <span className="font-serif text-3xl font-bold tabular-nums text-foreground">

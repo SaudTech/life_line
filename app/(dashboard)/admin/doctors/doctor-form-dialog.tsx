@@ -1,10 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useForm, Controller, type Path, type FieldValues } from "react-hook-form";
+import {
+  useForm,
+  useFieldArray,
+  useWatch,
+  Controller,
+  type Control,
+  type FieldErrors,
+  type Path,
+  type FieldValues,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
 import { toast } from "sonner";
+import { Plus, Trash2 } from "lucide-react";
 
 import {
   Dialog,
@@ -29,9 +39,14 @@ import {
   type NewDoctorValues,
   type UpdateDoctorValues,
 } from "@/lib/doctors/schema";
+import {
+  MAX_REVISIT_TIERS,
+  bandRangeLabel,
+  ladderThroughDay,
+} from "@/lib/doctors/revisit-tiers";
 import { createDoctorAction, updateDoctorAction } from "@/lib/doctors/actions";
 import { createDepartmentAction, deleteDepartmentAction } from "@/lib/departments/actions";
-import { formatPaise } from "@/lib/money";
+import { formatPaise, isValidRupees, rupeesToPaise } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { ActionResult } from "@/lib/forms/action-result";
 import type { DoctorListRow } from "@/lib/doctors/repository";
@@ -87,8 +102,10 @@ function DialogShell({
 }) {
   return (
     <Dialog open onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="flex max-h-[85vh] flex-col overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      {/* The dialog itself never scrolls - the header and the footer stay put and
+          only the fields between them move, so Save is always one click away. */}
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
@@ -316,6 +333,198 @@ function ConsultationDesignField<T extends FieldValues>({
   );
 }
 
+// The three form fields that make up a doctor's revisit ladder. Both doctor
+// schemas carry them identically, so this component reads them under one
+// concrete shape rather than threading the parent's generic through
+// useFieldArray/useWatch (which need a literal field name, not a Path<T>).
+interface LadderForm {
+  fee: string;
+  revisitValidityDays: number;
+  revisitTiers: { throughDay: number; price: string }[];
+}
+
+// A number typed into an <input type="number"> comes back as a STRING (RHF only
+// coerces with valueAsNumber, and the zod schema is what coerces on submit), so
+// the live ladder has to read every day value defensively.
+function toDay(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+// Revisit pricing (migration 0027) - the free window and the priced bands that
+// taper after it, edited as ONE control because they are one rule. Each row's
+// left cell is the span that row covers, derived live from the row above it, so
+// an admin sets end days and immediately reads back the bands the counter will
+// charge; the footer states what happens past the last band (a new, full-fee
+// consultation) instead of leaving it to be inferred.
+//
+// Nothing here computes a charge - it renders the same shape resolveRevisitCharge
+// resolves, and every rule it hints at is enforced by validateRevisitLadder via
+// the schema (§1: the UI never re-implements a rule).
+function RevisitPricingField<T extends FieldValues>({
+  control,
+  register,
+  errors,
+  idPrefix,
+}: {
+  control: import("react-hook-form").Control<T>;
+  register: import("react-hook-form").UseFormRegister<T>;
+  errors: import("react-hook-form").FieldErrors<T>;
+  idPrefix: string;
+}) {
+  const ladderControl = control as unknown as Control<LadderForm>;
+  const { fields, append, remove } = useFieldArray({
+    control: ladderControl,
+    name: "revisitTiers",
+  });
+  const watched = useWatch({ control: ladderControl, name: "revisitTiers" });
+  const rows = watched ?? [];
+  const freeDays = toDay(useWatch({ control: ladderControl, name: "revisitValidityDays" }));
+  const feeRaw = useWatch({ control: ladderControl, name: "fee" }) ?? "";
+
+  const ladderErrors = (errors as unknown as FieldErrors<LadderForm>).revisitTiers;
+  const freeDaysError = (errors as FieldValues).revisitValidityDays;
+
+  // The day each band starts on: one past whatever ended before it. A row whose
+  // own end day is still blank or malformed shows "-" rather than a wrong span.
+  const days = rows.map((r) => toDay(r?.throughDay));
+  function startOf(index: number): number | null {
+    const previous = index === 0 ? freeDays : days[index - 1];
+    return previous === null ? null : previous + 1;
+  }
+  function spanOf(index: number): string {
+    const from = startOf(index);
+    const through = days[index];
+    return from === null || through === null ? "-" : bandRangeLabel(from, through);
+  }
+
+  const lastDay = ladderThroughDay({
+    freeThroughDay: freeDays ?? 0,
+    tiers: days.filter((d): d is number => d !== null).map((d) => ({ throughDay: d, pricePaise: 1 })),
+  });
+  const full = isValidRupees(feeRaw) ? formatPaise(rupeesToPaise(feeRaw)) : null;
+  const atCap = fields.length >= MAX_REVISIT_TIERS;
+
+  const dayInput =
+    "h-8 w-16 px-2 text-center font-mono tabular-nums";
+
+  return (
+    <Field data-invalid={freeDaysError || ladderErrors ? true : undefined}>
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel htmlFor={`${idPrefix}-days`}>Revisit pricing</FieldLabel>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={atCap}
+          onClick={() => append({ throughDay: (lastDay ?? 0) + 1, price: "" })}
+          className="-my-1 h-7 gap-1 px-2 text-xs"
+        >
+          <Plus className="size-3.5" aria-hidden />
+          Add reduced rate
+        </Button>
+      </div>
+
+      <div className="overflow-hidden rounded-md border">
+        <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="w-[86px] shrink-0">Days</span>
+          <span className="w-16 shrink-0 text-center">Last day</span>
+          <span className="min-w-0 flex-1">Charge</span>
+          <span className="w-7 shrink-0" aria-hidden />
+        </div>
+
+        {/* The free window - the one band that already existed. */}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <span className="w-[86px] shrink-0 truncate text-xs font-semibold text-primary">
+            {freeDays === null ? "-" : bandRangeLabel(0, freeDays)}
+          </span>
+          <Input
+            id={`${idPrefix}-days`}
+            type="number"
+            inputMode="numeric"
+            step="1"
+            min="0"
+            aria-label="Free through day"
+            aria-invalid={freeDaysError ? true : undefined}
+            className={dayInput}
+            onFocus={selectOnFocus}
+            {...register("revisitValidityDays" as Path<T>)}
+          />
+          <span className="min-w-0 flex-1 text-xs font-semibold text-primary">Free</span>
+          <span className="w-7 shrink-0" aria-hidden />
+        </div>
+
+        {fields.map((row, i) => {
+          const rowError = ladderErrors?.[i];
+          return (
+            <div key={row.id} className="border-t px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="w-[86px] shrink-0 truncate text-xs font-medium text-secondary-foreground">
+                  {spanOf(i)}
+                </span>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="0"
+                  aria-label={`Reduced rate ${i + 1} - last day`}
+                  aria-invalid={rowError?.throughDay ? true : undefined}
+                  className={dayInput}
+                  onFocus={selectOnFocus}
+                  {...register(`revisitTiers.${i}.throughDay` as Path<T>)}
+                />
+                <div className="flex min-w-0 flex-1 items-center gap-1">
+                  <span className="text-xs text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 400"
+                    aria-label={`Reduced rate ${i + 1} - amount`}
+                    aria-invalid={rowError?.price ? true : undefined}
+                    className="h-8 min-w-0 flex-1 font-mono tabular-nums"
+                    onFocus={selectOnFocus}
+                    {...register(`revisitTiers.${i}.price` as Path<T>)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  aria-label={`Remove reduced rate ${i + 1}`}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Trash2 className="size-3.5" aria-hidden />
+                </button>
+              </div>
+              {rowError ? (
+                <FieldError errors={[(rowError.throughDay ?? rowError.price) as never]} />
+              ) : null}
+            </div>
+          );
+        })}
+
+        {/* What happens past the last band: not a revisit at all. */}
+        <div className="flex items-center gap-2 border-t bg-muted/40 px-3 py-2 text-xs">
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {freeDays === null ? "After that" : `Day ${lastDay + 1} onwards`}
+          </span>
+          <span className="shrink-0 font-mono tabular-nums text-secondary-foreground">
+            {full === null ? "Full fee" : `Full fee ₹${full}`}
+          </span>
+        </div>
+      </div>
+
+      <FieldError errors={[freeDaysError as never]} />
+      <p className="text-xs text-muted-foreground">
+        Days are counted from the first consultation (the consultation day itself is day 0). A
+        return visit is charged the rate for the day it falls on; once the last one runs out, it
+        is a new consultation at the full fee.
+      </p>
+    </Field>
+  );
+}
+
 // The form fields shared by add + edit, kept in one place so the two forms
 // never drift. Generic over the values type; `errors` is the RHF error map.
 function DoctorFields<T extends FieldValues>({
@@ -339,7 +548,6 @@ function DoctorFields<T extends FieldValues>({
   const phone = "phone" as Path<T>;
   const status = "status" as Path<T>;
   const fee = "fee" as Path<T>;
-  const days = "revisitValidityDays" as Path<T>;
   // Two fields per row at sm+ (falls back to one column on narrow phones) -
   // seven stacked fields was overflowing the dialog's viewport height, so
   // related fields are paired side by side instead of piling straight down.
@@ -432,40 +640,27 @@ function DoctorFields<T extends FieldValues>({
           />
           <FieldError errors={[errors.doctorShareValue as never]} />
         </Field>
-        <Field data-invalid={errors.revisitValidityDays ? true : undefined}>
-          <FieldLabel htmlFor={`${idPrefix}-days`}>Revisit validity (days)</FieldLabel>
-          <Input
-            id={`${idPrefix}-days`}
-            type="number"
-            inputMode="numeric"
-            step="1"
-            min="0"
-            placeholder="e.g. 7"
-            aria-invalid={errors.revisitValidityDays ? true : undefined}
-            onFocus={selectOnFocus}
-            {...register(days)}
+        <Field data-invalid={errors.consultationTemplateId ? true : undefined}>
+          <FieldLabel htmlFor={`${idPrefix}-design`}>Consultation print design</FieldLabel>
+          <ConsultationDesignField
+            control={control}
+            name={"consultationTemplateId" as Path<T>}
+            invalid={errors.consultationTemplateId ? true : false}
+            designs={consultationDesigns}
           />
-          <FieldError errors={[errors.revisitValidityDays as never]} />
+          <FieldError errors={[errors.consultationTemplateId as never]} />
           <p className="text-xs text-muted-foreground">
-            Free re-consultation window.
+            Leave on Default unless this doctor needs their own layout.
           </p>
         </Field>
       </div>
 
-      <Field data-invalid={errors.consultationTemplateId ? true : undefined}>
-        <FieldLabel htmlFor={`${idPrefix}-design`}>Consultation print design</FieldLabel>
-        <ConsultationDesignField
-          control={control}
-          name={"consultationTemplateId" as Path<T>}
-          invalid={errors.consultationTemplateId ? true : false}
-          designs={consultationDesigns}
-        />
-        <FieldError errors={[errors.consultationTemplateId as never]} />
-        <p className="text-xs text-muted-foreground">
-          Receipt layout used for this doctor&apos;s consultations. Leave on Default unless
-          they need their own. Manage layouts under Admin → Receipt designs.
-        </p>
-      </Field>
+      <RevisitPricingField
+        control={control}
+        register={register}
+        errors={errors}
+        idPrefix={idPrefix}
+      />
     </FieldGroup>
   );
 }
@@ -526,6 +721,9 @@ function AddForm({
       status: "available",
       fee: "",
       revisitValidityDays: 0,
+      // No priced bands: a new doctor behaves exactly as every doctor did before
+      // migration 0027 - free inside the window, full fee after it.
+      revisitTiers: [],
       doctorShareType: "percentage",
       doctorShareValue: "0",
       // "" = the location's active consultation design (migration 0024).
@@ -554,17 +752,19 @@ function AddForm({
       description="Add a doctor to the consultation master list."
       onClose={onClose}
     >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <DoctorFields
-          register={register}
-          control={control}
-          errors={errors}
-          departments={departments}
-          consultationDesigns={consultationDesigns}
-          idPrefix="ad"
-        />
-        {errors.root ? <FieldError errors={[errors.root]} /> : null}
-        <DialogFooter className="mt-6 flex-row justify-start gap-2">
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+          <DoctorFields
+            register={register}
+            control={control}
+            errors={errors}
+            departments={departments}
+            consultationDesigns={consultationDesigns}
+            idPrefix="ad"
+          />
+          {errors.root ? <FieldError errors={[errors.root]} /> : null}
+        </div>
+        <DialogFooter className="mt-4 shrink-0 flex-row justify-start gap-2 border-t pt-4">
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Adding…" : "Add doctor"}
           </Button>
@@ -601,6 +801,11 @@ function EditForm({
       // Prefill the fee as a plain rupee string ("250.00") the schema accepts.
       fee: formatPaise(doctor.fee_paise).replace(/,/g, ""),
       revisitValidityDays: doctor.revisit_validity_days,
+      // Prices prefill as plain rupee strings ("400.00"), same as the fee.
+      revisitTiers: doctor.revisit_tiers.map((t) => ({
+        throughDay: t.through_day,
+        price: formatPaise(t.price_paise).replace(/,/g, ""),
+      })),
       doctorShareType: (doctor.share_type || "percentage") as DoctorShareType,
       doctorShareValue:
         doctor.share_type === "flat"
@@ -629,20 +834,22 @@ function EditForm({
   return (
     <DialogShell
       title="Edit doctor"
-      description="Update name, department, phone, status, fee, revisit validity and print design."
+      description="Update name, department, phone, status, fee, revisit pricing and print design."
       onClose={onClose}
     >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <DoctorFields
-          register={register}
-          control={control}
-          errors={errors}
-          departments={departments}
-          consultationDesigns={consultationDesigns}
-          idPrefix="ed"
-        />
-        {errors.root ? <FieldError errors={[errors.root]} /> : null}
-        <DialogFooter className="mt-6 flex-row justify-start gap-2">
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+          <DoctorFields
+            register={register}
+            control={control}
+            errors={errors}
+            departments={departments}
+            consultationDesigns={consultationDesigns}
+            idPrefix="ed"
+          />
+          {errors.root ? <FieldError errors={[errors.root]} /> : null}
+        </div>
+        <DialogFooter className="mt-4 shrink-0 flex-row justify-start gap-2 border-t pt-4">
           <Button type="submit" disabled={isSubmitting || !isDirty}>
             {isSubmitting ? "Saving…" : "Save changes"}
           </Button>

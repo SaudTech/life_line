@@ -36,6 +36,7 @@ const REPORT_ACTIONS = [
   "patient.create",
   "consultation.create",
   "consultation.revisit",
+  "consultation.revisit_paid",
   "admission.admit",
   "admission.discharge",
   "discount.approve",
@@ -59,19 +60,43 @@ export interface ActivityCountRow {
   count: number;
 }
 
-// One doctor's cut of the day's consultation collections, summed per bill by the
-// ONE share rule (lib/doctors/share.ts) in the repository's grouped query. The
-// rate fields describe the doctor's CURRENT configuration (the rule prices at
-// report time, nothing is snapshotted) so the UI can say how the figure was
-// arrived at on the row itself.
+// One doctor's cut of the day's consultation collections, summed from the share
+// SNAPSHOTTED onto each bill when it was written (migration 0025). The rate fields
+// are the rate that was frozen with it, so the UI can say how the figure was
+// arrived at AT THE TIME - not what the doctor happens to be on now. A doctor whose
+// rate changed mid-window produces one row per rate, which is the honest reading.
+//
+// All three rate fields are nullable: a legacy consultation bill written before
+// 0025 has an amount but never recorded a rate, and "no rate" is a different
+// statement from "0%".
 export interface DoctorShareRow {
   doctorId: string;
   doctorName: string;
-  shareType: string; // 'percentage' | 'flat'
-  sharePercentage: number; // whole percent (meaningful when shareType='percentage')
-  shareFlatPaise: number; // integer paise (meaningful when shareType='flat'; 0 otherwise)
+  shareType: string | null; // 'percentage' | 'flat' | null (no rate recorded)
+  sharePercentage: number | null; // whole percent (set when shareType='percentage')
+  shareFlatPaise: number | null; // integer paise (set when shareType='flat')
   count: number; // consultation bills for this doctor in scope
   sharePaise: number; // the doctor's summed share, integer paise
+}
+
+// Cash handed to ONE doctor on this clinic day, from the payout records (migration
+// 0026). This is the settlement half of the doctor economics, and it is a different
+// quantity from DoctorShareRow above in every way that matters:
+//
+//   DoctorShareRow  - what the day's consultations EARNED the doctor. Accrual. The
+//                     money is still in the drawer. Informational; changes nothing.
+//   DoctorPayoutRow - what was PHYSICALLY HANDED OVER today. Cash. It left the
+//                     drawer, so it must come out of money-in or the till is short.
+//
+// Reckoned on WHEN IT WAS PAID (doctor_payouts.paid_at), never on which period it
+// covered: a Monday shift settled on Wednesday is Wednesday's cash movement, and
+// Wednesday is the drawer that will be short. Attributed to WHO PAID IT
+// (doctor_payouts.paid_by) for the same reason - that is whose till it came out of.
+export interface DoctorPayoutRow {
+  doctorId: string;
+  doctorName: string;
+  count: number; // consultations the payout covered
+  paise: number; // cash handed over, integer paise
 }
 
 export interface MoneyRaw {
@@ -97,6 +122,11 @@ export interface MoneyRaw {
   // (§In-Patient - a refund is handled explicitly, never ignored). Already netted out
   // of billsBy*, so this is the visible record of the outflow, not a second deduction.
   refunds: { count: number; totalPaise: number };
+  // Cash I handed to DOCTORS today, one row per doctor. Unlike refunds this is NOT
+  // netted out anywhere else - nothing in the bills table knows a payout happened - so
+  // the shaper subtracts it from money-in exactly once, and this is the only place it
+  // is deducted.
+  doctorPayouts: DoctorPayoutRow[];
 }
 
 // ── Document upload compliance (raw) ───────────────────────────────────────────
@@ -173,13 +203,32 @@ export interface DailyReport {
   advancesTotalPaise: number;
   advancesCount: number;
   refunds: { count: number; totalPaise: number };
+  // Doctors paid today, per doctor, plus the totals. A payout sheet that says only
+  // "-₹5,564.00" is unauditable at the counter: the first question when the till is
+  // short is "which doctor, and for how many consultations", so the sheet answers it
+  // by name (§4, a movement of cash is never an unexplained number).
+  doctorPayouts: DoctorPayoutRow[];
+  doctorPayoutTotalPaise: number;
+  doctorPayoutCount: number; // consultations covered, across all payouts
   // The ONE number that has to match the drawer at close:
-  //   bills collected + advances taken − refunds paid out
-  // The three parts are separate FIELDS, not a pre-netted lump, so the sheet can show a
-  // reader the arithmetic: a ₹20,000 advance in, a ₹2,000 refund back out. This is the
-  // same quantity the admin dashboard sums for the same day (lib/money-in.ts, which
-  // nets the refund into the bill instead) - if the two ever disagree, one of them is
-  // lying about the hospital's money.
+  //   bills collected + advances taken − refunds paid out − doctors paid
+  // The parts are separate FIELDS, not a pre-netted lump, so the sheet can show a
+  // reader the arithmetic: a ₹20,000 advance in, a ₹2,000 refund back out, ₹5,564
+  // handed to Dr Anita Rao.
+  //
+  // WHY THE DOCTOR PAYOUT IS HERE AND THE DOCTOR SHARE IS NOT. They are two different
+  // quantities and only one is cash. `doctorShareTotalPaise` is what the day's
+  // consultations EARNED the doctors - it is still sitting in the drawer, so
+  // subtracting it would make the sheet ask for less money than is physically there.
+  // A payout is the doctor walking away with notes in hand. Until migration 0026 the
+  // second thing was not recorded at all, so this sheet told the counter to expect cash
+  // that had already left.
+  //
+  // This is deliberately NOT mirrored onto the admin dashboard. That screen measures
+  // REVENUE - what the hospital earned over a range - and a payout is a distribution of
+  // revenue already earned, not negative revenue. It already deducts the doctors' cut
+  // on an accrual basis (getDoctorShareTotal). Only this figure has to match physical
+  // cash, so only this figure nets the payout out.
   moneyInTotalPaise: number;
   // Document upload compliance: of the records this subject produced on the day,
   // how many have their scans uploaded and exactly which are still pending. Not
@@ -261,6 +310,8 @@ export function shapeDailyReport(
   const hospitalShareTotalPaise = consultationCollected.totalPaise - doctorShareTotalPaise;
   const advancesTotalPaise = advancesByMode.reduce((sum, l) => sum + l.totalPaise, 0);
   const advancesCount = advancesByMode.reduce((sum, l) => sum + l.count, 0);
+  const doctorPayoutTotalPaise = money.doctorPayouts.reduce((sum, p) => sum + p.paise, 0);
+  const doctorPayoutCount = money.doctorPayouts.reduce((sum, p) => sum + p.count, 0);
 
   // withDocuments as a REMAINDER of the two figures the repository reads, clamped
   // so a count race (a record billed between the total and pending queries) can
@@ -282,6 +333,9 @@ export function shapeDailyReport(
     advancesCount === 0 &&
     money.voids.count === 0 &&
     money.refunds.count === 0 &&
+    // A day whose only event was paying a doctor is NOT an empty day - real cash left
+    // the drawer and the sheet has to account for it.
+    money.doctorPayouts.length === 0 &&
     money.discountsApproved.count === 0;
 
   return {
@@ -302,11 +356,19 @@ export function shapeDailyReport(
     advancesTotalPaise,
     advancesCount,
     refunds: money.refunds,
+    doctorPayouts: money.doctorPayouts,
+    doctorPayoutTotalPaise,
+    doctorPayoutCount,
     // Taken in, less handed back. The refund is subtracted exactly ONCE here, because
     // the by-type/by-mode lines above are now gross of refunds (the repository sums
     // billCollectedSql). Do not net it in there as well, or a refunded day is short by
-    // twice the refund.
-    moneyInTotalPaise: collectedTotalPaise + advancesTotalPaise - money.refunds.totalPaise,
+    // twice the refund. The payout is subtracted once for the opposite reason: nothing
+    // else in the money path knows it happened at all.
+    moneyInTotalPaise:
+      collectedTotalPaise +
+      advancesTotalPaise -
+      money.refunds.totalPaise -
+      doctorPayoutTotalPaise,
     documents: {
       opd: opdDocs,
       ipd: ipdDocs,
@@ -327,5 +389,6 @@ export function emptyMoneyRaw(): MoneyRaw {
     doctorShares: [],
     advancesByMode: [],
     refunds: { count: 0, totalPaise: 0 },
+    doctorPayouts: [],
   };
 }

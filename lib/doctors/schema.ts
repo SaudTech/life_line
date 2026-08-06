@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { isValidRupees, isRupeesTooLarge, MAX_RUPEES } from "@/lib/money";
+import { isValidRupees, isRupeesTooLarge, MAX_RUPEES, rupeesToPaise } from "@/lib/money";
+import { MAX_REVISIT_DAY, MAX_REVISIT_TIERS, validateRevisitLadder } from "./revisit-tiers";
 
 // Shown instead of the generic format message when the amount is shaped like a
 // number but exceeds the cap (e.g. "99999999") - "invalid format" is the wrong
@@ -51,7 +52,26 @@ const revisitValidityDays = z.coerce
   .number()
   .int("Whole days only.")
   .min(0, "Cannot be negative.")
-  .max(3650, "That's too many days.");
+  .max(MAX_REVISIT_DAY, "That's too many days.");
+
+// The priced bands after the free window (migration 0027). Like `fee`, each
+// band's price is a rupee STRING here and becomes integer paise in the action.
+// Shape only at this level - whether the bands increase, clear the free window
+// and stay under the fee is a cross-field question, answered by the ONE ladder
+// rule in ./revisit-tiers (never re-implemented here).
+const revisitTier = z.object({
+  throughDay: z.coerce
+    .number()
+    .int("Whole days only.")
+    .min(0, "Cannot be negative.")
+    .max(MAX_REVISIT_DAY, "That's too many days."),
+  price: z.string().trim(),
+});
+const revisitTiers = z
+  .array(revisitTier)
+  .max(MAX_REVISIT_TIERS, `At most ${MAX_REVISIT_TIERS} reduced rates.`)
+  .default([]);
+export type RevisitTierValue = z.infer<typeof revisitTier>;
 
 // The doctor's share of the consultation fee, quoted either as a whole percent
 // OR a flat rupee amount - never both. One text field (`doctorShareValue`) plus
@@ -91,6 +111,62 @@ function validateDoctorShare(
   }
 }
 
+// The revisit ladder as a whole: each band's price must parse as rupees, and the
+// bands together must form a sound ladder above the free window.
+//
+// Bands are checked in the order they appear in the FORM, not sorted first. The
+// form shows each row the span it covers, derived from the row above it, so
+// sorting here would accept a ladder the admin is being shown as broken - and
+// silently reorder what they typed. Rows must read top to bottom the way they
+// will be charged.
+function validateRevisitPricing(
+  v: {
+    fee: string;
+    revisitValidityDays: number;
+    revisitTiers: { throughDay: number; price: string }[];
+  },
+  ctx: z.RefinementCtx,
+) {
+  let malformed = false;
+  v.revisitTiers.forEach((t, i) => {
+    if (isRupeesTooLarge(t.price)) {
+      malformed = true;
+      ctx.addIssue({ code: "custom", path: ["revisitTiers", i, "price"], message: AMOUNT_TOO_LARGE });
+    } else if (!isValidRupees(t.price)) {
+      malformed = true;
+      ctx.addIssue({
+        code: "custom",
+        path: ["revisitTiers", i, "price"],
+        message: "Enter a valid amount (e.g. 400 or 400.50).",
+      });
+    }
+  });
+  // A band whose price didn't parse can't be compared against the others; report
+  // that and stop rather than piling a second, confusing message on the same row.
+  if (malformed) return;
+
+  const problem = validateRevisitLadder({
+    freeThroughDay: v.revisitValidityDays,
+    tiers: v.revisitTiers.map((t) => ({
+      throughDay: t.throughDay,
+      pricePaise: rupeesToPaise(t.price),
+    })),
+    // A fee that isn't a valid amount already has its own error on the fee field.
+    fullFeePaise: isValidRupees(v.fee) ? rupeesToPaise(v.fee) : null,
+  });
+  if (problem) {
+    ctx.addIssue({
+      code: "custom",
+      path: [
+        "revisitTiers",
+        problem.index,
+        problem.field === "pricePaise" ? "price" : "throughDay",
+      ],
+      message: problem.message,
+    });
+  }
+}
+
 // Which consultation receipt design this doctor's bills print on (migration
 // 0024). "" means "use the default" - the location's ACTIVE consultation design
 // - and is what every doctor has until an admin picks otherwise; anything else
@@ -113,10 +189,12 @@ export const newDoctorSchema = z
     status,
     fee,
     revisitValidityDays,
+    revisitTiers,
     consultationTemplateId,
     ...doctorShareShape,
   })
-  .superRefine(validateDoctorShare);
+  .superRefine(validateDoctorShare)
+  .superRefine(validateRevisitPricing);
 export type NewDoctorValues = z.infer<typeof newDoctorSchema>;
 
 export const updateDoctorSchema = z
@@ -128,10 +206,12 @@ export const updateDoctorSchema = z
     status,
     fee,
     revisitValidityDays,
+    revisitTiers,
     consultationTemplateId,
     ...doctorShareShape,
   })
-  .superRefine(validateDoctorShare);
+  .superRefine(validateDoctorShare)
+  .superRefine(validateRevisitPricing);
 export type UpdateDoctorValues = z.infer<typeof updateDoctorSchema>;
 
 export const setDoctorActiveSchema = z.object({

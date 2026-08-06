@@ -21,6 +21,7 @@ describe("navItemsForRole", () => {
       "Procedures",
       "IPD",
       "Reports",
+      "Doctor Earnings",
       "Receipt Templates",
       "Suggestions",
     ]);
@@ -65,6 +66,9 @@ describe("navItemsForRole", () => {
       { href: "/consultations/history", label: "OPD" },
       { href: "/admissions", label: "IPD" },
       { href: "/reports", label: "My Day" },
+      // On every role: the doctor is at the counter asking for their money, so
+      // whichever desk user is on shift must be able to pull it.
+      { href: "/doctor-earnings", label: "Doctor Earnings" },
     ]);
   });
 
@@ -75,6 +79,9 @@ describe("navItemsForRole", () => {
       { href: "/procedures", label: "Procedures" },
       { href: "/admissions", label: "IPD" },
       { href: "/reports", label: "My Day" },
+      // On every role: the doctor is at the counter asking for their money, so
+      // whichever desk user is on shift must be able to pull it.
+      { href: "/doctor-earnings", label: "Doctor Earnings" },
     ]);
   });
 
@@ -85,6 +92,9 @@ describe("navItemsForRole", () => {
       { href: "/procedures", label: "Procedures" },
       { href: "/admissions", label: "IPD" },
       { href: "/reports", label: "My Day" },
+      // On every role: the doctor is at the counter asking for their money, so
+      // whichever desk user is on shift must be able to pull it.
+      { href: "/doctor-earnings", label: "Doctor Earnings" },
     ]);
   });
 

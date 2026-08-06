@@ -107,6 +107,11 @@ export async function getEndDayDocument(
     advancesCountText: String(report.advancesCount),
     moneyInText: formatRupees(report.moneyInTotalPaise),
     refundsText: `${formatRupees(report.refunds.totalPaise)} (${report.refunds.count})`,
+    // Amount handed over, then the consultations it covered - the same "(n)" shape the
+    // refund and void lines use, so every parenthesised count on the sheet reads the
+    // same way. Zero-safe: a day with no payouts prints "₹0.00 (0)" rather than a gap,
+    // which keeps the fixed A4 flow identical every day (§5, nothing moves).
+    doctorsPaidText: `${formatRupees(report.doctorPayoutTotalPaise)} (${report.doctorPayoutCount})`,
     activityTotalText: String(report.activityTotal),
     modeRows: report.byMode.map((l) => ({
       mode: l.label,
@@ -122,6 +127,11 @@ export async function getEndDayDocument(
       doctor: d.doctorName,
       count: String(d.count),
       amountText: formatRupees(d.sharePaise),
+    })),
+    doctorPaidRows: report.doctorPayouts.map((p) => ({
+      doctor: p.doctorName,
+      count: String(p.count),
+      amountText: formatRupees(p.paise),
     })),
     advanceModeRows: report.advancesByMode.map((l) => ({
       mode: l.label,

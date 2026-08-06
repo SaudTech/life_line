@@ -28,7 +28,39 @@ export function formatActivity(
   const who = targetName ? ` - ${targetName}` : "";
   const amount = formatAmount(details);
   const voided = formatVoidDetail(action, details);
-  return { text: `${label}${who}${amount}${voided}`, tone };
+  const payout = formatPayoutDetail(action, details);
+  return { text: `${label}${who}${amount}${voided}${payout}`, tone };
+}
+
+// A doctor payout reads with WHO was paid, HOW MUCH, and for WHICH period - e.g.
+// 'Doctor paid - Dr. Anita Rao · ₹7,000.00 · 35 consultations · 12:04 pm to 1:56 pm'.
+//
+// This is the one activity row where the missing detail IS the point: real cash left
+// the drawer and this feed is where an admin notices it. The bare label cannot be
+// improved by the feed query either - the row's entity is 'doctor_payout', which
+// listRecentActivity has no join for, so target_name is always null here. Everything
+// therefore comes from the details recorded at payout time, which is also what makes
+// it an honest audit line: it says what was true when the money moved, not what the
+// doctor's record says today.
+function formatPayoutDetail(action: string, details?: Record<string, unknown> | null): string {
+  if (action !== "doctor.payout" || !details) return "";
+  const parts: string[] = [];
+  const doctor = typeof details.doctor_name === "string" ? details.doctor_name.trim() : "";
+  if (doctor) parts.push(doctor);
+  const paise = asNumber(details.paid_paise);
+  if (paise != null) parts.push(`₹${formatPaise(paise)}`);
+  const count = asNumber(details.consultation_count);
+  if (count != null) parts.push(`${count} ${count === 1 ? "consultation" : "consultations"}`);
+  const covers = typeof details.covers_label === "string" ? details.covers_label.trim() : "";
+  if (covers) parts.push(covers);
+  return parts.length ? ` - ${parts.join(" · ")}` : "";
+}
+
+// pg returns JSONB numbers as numbers and BIGINT as text - accept both, reject
+// anything that is neither rather than printing "₹NaN" on a money line.
+function asNumber(raw: unknown): number | null {
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
 // A voided bill reads with WHY and WHO authorised it - e.g.
@@ -52,11 +84,8 @@ function formatVoidDetail(action: string, details?: Record<string, unknown> | nu
 // numbers as numbers and BIGINT as text, so accept both. Display only - the amount
 // was computed and stored in integer paise server-side (§1).
 function formatAmount(details?: Record<string, unknown> | null): string {
-  const raw = details?.total_paise;
-  if (raw == null) return "";
-  const n = typeof raw === "string" ? Number(raw) : raw;
-  if (typeof n !== "number" || !Number.isFinite(n)) return "";
-  return ` - ₹${formatPaise(n)}`;
+  const n = asNumber(details?.total_paise);
+  return n == null ? "" : ` - ₹${formatPaise(n)}`;
 }
 
 // Compact relative time for the feed ("just now", "2 hours ago", "Yesterday",

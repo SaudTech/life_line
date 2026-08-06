@@ -208,28 +208,45 @@ export const END_DAY_DEFAULT_TEMPLATE = {
       // ── Money in ─────────────────────────────────────────────────────────
       // The one number that has to match the drawer at close, shown as its WORKING:
       // what was taken for bills (Total collected, above), what was taken as deposits
-      // (Total deposits held, above), less what was handed back on this line. A reader
-      // counting cash can follow the arithmetic instead of reconstructing it.
-      labeledField("refundsText", { x: 100, y: 216, w: 100, h: 4.5 }, {
+      // (Total deposits held, above), less the two outflows on the lines below. A
+      // reader counting cash can follow the arithmetic instead of reconstructing it.
+      //
+      // The two deductions are NOT the same kind of thing and both have to be here:
+      //   • Refunds are already netted inside the bill they came from - this line is
+      //     the visible record of a movement, and the shaper subtracts it once.
+      //   • Doctors paid is known to NOTHING else in the money path. No bill records a
+      //     payout, so before it existed this sheet asked the counter to produce cash
+      //     that had physically left hours earlier.
+      // Neither is "Doctor share" in Memoranda above - that is what the day EARNED the
+      // doctors, and it is still sitting in the drawer.
+      labeledField("refundsText", { x: 100, y: 214, w: 100, h: 4.5 }, {
+        fontSize: 8.5,
+        alignment: "right",
+        fontColor: INK,
+      }),
+      // The per-doctor names have no room in this fixed flow (same constraint that
+      // keeps doctorShareTable off it); the `doctorPaidTable` catalog field exists for
+      // a custom design that wants them. The on-screen sheet names every doctor.
+      labeledField("doctorsPaidText", { x: 100, y: 219.5, w: 100, h: 4.5 }, {
         fontSize: 8.5,
         alignment: "right",
         fontColor: INK,
       }),
       // Two rules stacked = the ledger's double rule, which marks a figure nothing
       // follows (pdfme has no double-border style, so it is drawn as two lines).
-      hLine(10, 222, 190, 0.7, INK),
-      hLine(10, 223.4, 190, 0.35, INK),
-      staticText("MONEY IN", { x: 10, y: 225.5, w: 80, h: 5.5 }, {
+      hLine(10, 225.5, 190, 0.7, INK),
+      hLine(10, 226.9, 190, 0.35, INK),
+      staticText("MONEY IN", { x: 10, y: 229, w: 80, h: 5.5 }, {
         fontSize: 10,
         characterSpacing: 1.4,
         fontColor: INK,
       }),
       staticText(
-        "Total collected plus deposits held, less refunds. Reconcile the drawer against this.",
-        { x: 10, y: 231, w: 88, h: 6 },
+        "Collected plus deposits held, less refunds and doctors paid. Reconcile the drawer against this.",
+        { x: 10, y: 234.5, w: 88, h: 6 },
         { fontSize: 6.5, fontColor: MUTED },
       ),
-      labeledField("moneyInText", { x: 100, y: 225, w: 100, h: 9 }, {
+      labeledField("moneyInText", { x: 100, y: 228.5, w: 100, h: 9 }, {
         fontSize: 16,
         alignment: "right",
         fontColor: INK,

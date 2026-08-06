@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatPaise } from "@/lib/money";
 import { DOCTOR_STATUS_LABELS, type DoctorStatus } from "@/lib/doctors/schema";
+import { summarizeRevisitLadder } from "@/lib/doctors/revisit-tiers";
 import type { DoctorListRow } from "@/lib/doctors/repository";
 
 // Doctor card - mirrors app/(dashboard)/admin/users/user-card.tsx's shape (same
@@ -48,6 +49,15 @@ export function useDoctorDerived(doctor: DoctorListRow) {
   return {
     status,
     initials: initials(doctor.name),
+    // One phrase for the whole revisit ladder (migration 0027) - the bands
+    // themselves are read and edited in the dialog, where there's room for them.
+    revisit: summarizeRevisitLadder(
+      doctor.revisit_validity_days,
+      doctor.revisit_tiers.map((t) => ({
+        throughDay: t.through_day,
+        pricePaise: Number(t.price_paise),
+      })),
+    ),
   };
 }
 
@@ -154,10 +164,7 @@ export function DoctorCard(props: DoctorCardProps) {
         <div className="flex flex-col gap-1.5 text-xs font-medium">
           <Row label="Phone" value={doctor.phone || "-"} mono />
           <Row label="Fee" value={`₹${formatPaise(doctor.fee_paise)}`} mono />
-          <Row
-            label="Revisit validity"
-            value={`${doctor.revisit_validity_days} ${doctor.revisit_validity_days === 1 ? "day" : "days"}`}
-          />
+          <Row label="Revisit" value={d.revisit} />
         </div>
       </div>
 

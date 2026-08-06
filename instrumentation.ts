@@ -7,8 +7,15 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const { pool } = await import("@/lib/db");
-  const { ensureFirstRun } = await import("@/first-run");
+  const { ensureFirstRun, ensureSuperAdmin } = await import("@/first-run");
   await ensureFirstRun(pool);
+
+  // Re-assert the break-glass super admin from .env. Runs AFTER ensureFirstRun,
+  // which guarantees the location every user needs. Self-healing on purpose: this is
+  // what makes a restart the way back in after a forgotten password, a mistaken
+  // deactivation, or a demotion. Neither call throws - a setup problem must never
+  // stop the counter from starting.
+  await ensureSuperAdmin(pool);
 
   // Permanently purge services whose Trash retention window has passed. Runs once
   // at boot and then daily, so the deletion actually happens after 7 days even if

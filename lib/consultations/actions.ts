@@ -12,7 +12,14 @@ import {
   getPatient,
   type PatientRow,
 } from "@/lib/patients/repository";
-import { getDoctorById } from "@/lib/doctors/repository";
+import { getDoctorById, type DoctorListRow } from "@/lib/doctors/repository";
+import { snapshotDoctorShare } from "@/lib/doctors/share";
+import {
+  describeRevisitLadder,
+  resolveRevisitCharge,
+  type RevisitBand,
+  type RevisitCharge,
+} from "@/lib/doctors/revisit-tiers";
 import { isValidRupees } from "@/lib/money";
 import { computeTotalPaise, canFinalizeBill } from "@/lib/billing/rules";
 import {
@@ -27,7 +34,7 @@ import {
   verifyPinSchema,
   type PaymentModeValue,
 } from "./schema";
-import { computeValidUntil, isRevisitFree, type IsoDay } from "./rules";
+import { computeValidUntil, daysBetween, type IsoDay } from "./rules";
 import { clinicToday } from "@/lib/date-range";
 import {
   createConsultationWithBill,
@@ -90,15 +97,72 @@ export async function listConsultationsAction(
   return { ok: true, data: rows };
 }
 
-export interface ConsultationPreview {
-  kind: "new" | "revisit";
-  feePaise: number; // the doctor's fee (0 shown for a revisit)
-  validUntil: IsoDay;
-  doctorName: string;
+// What this patient's next visit to this doctor costs, and the row it continues.
+// ONE resolver behind the preview, the discount authorization and the write, so
+// the three can never disagree about the price (DEVELOPMENT_RULES §1).
+//
+// The taper is read from the CONSULTATION, not from the doctor's current
+// settings: `series_started_on` is the day the run began and `valid_until` the
+// free window as it was granted THEN, so an admin editing the window tomorrow
+// cannot retroactively make a patient's past free visit chargeable. Only the
+// priced rates - which are never frozen anywhere - come from the doctor as they
+// stand right now.
+interface RevisitContext {
+  charge: RevisitCharge;
+  // The consultation this visit continues, or null when there is none to continue.
+  // Present for 'expired' too: that run existed, it has simply run out.
+  previous: { id: string; validUntil: IsoDay; seriesStartedOn: IsoDay } | null;
 }
 
-// Tell the UI, for a chosen patient + doctor, whether this will be a free revisit
-// or a new paid consultation - so it can show the fee/payment or "no charge". The
+async function resolveRevisitContext(
+  patientId: string,
+  doctor: DoctorListRow,
+  today: IsoDay,
+): Promise<RevisitContext> {
+  const latest = await findLatestConsultationForDoctor(patientId, doctor.id);
+  const fullFeePaise = Number(doctor.fee_paise);
+  if (!latest) {
+    return { charge: { kind: "expired", pricePaise: fullFeePaise }, previous: null };
+  }
+  const charge = resolveRevisitCharge(
+    {
+      freeThroughDay: daysBetween(latest.series_started_on, latest.valid_until),
+      tiers: doctor.revisit_tiers.map((t) => ({
+        throughDay: t.through_day,
+        pricePaise: Number(t.price_paise),
+      })),
+      fullFeePaise,
+    },
+    // Clamped: a consultation dated in the future (clock skew, a corrected
+    // system date) must read as "day 0", never throw at the counter.
+    Math.max(0, daysBetween(latest.series_started_on, today)),
+  );
+  return {
+    charge,
+    previous: {
+      id: latest.id,
+      validUntil: latest.valid_until,
+      seriesStartedOn: latest.series_started_on,
+    },
+  };
+}
+
+export interface ConsultationPreview {
+  kind: "new" | "free-revisit" | "paid-revisit";
+  feePaise: number; // what will be charged: 0 free, the reduced rate, or the full fee
+  validUntil: IsoDay;
+  doctorName: string;
+  // Only for a paid revisit. The counter line stays short - "Revisit · day 5" -
+  // and these back the info popover behind it: which day of the run this is, and
+  // the doctor's WHOLE ladder with the row that applies marked, so an operator
+  // asked "why ₹200?" can show the answer instead of reciting it.
+  revisitDay?: number;
+  ladder?: RevisitBand[];
+  currentBandIndex?: number;
+}
+
+// Tell the UI, for a chosen patient + doctor, what this visit will cost - free
+// revisit, a reduced revisit rate, or a new consultation at the full fee. The
 // authoritative decision is re-made on submit; this is only for display.
 export async function previewConsultationAction(input: {
   patientId: string;
@@ -110,19 +174,49 @@ export async function previewConsultationAction(input: {
     return { ok: false, formError: "That doctor is unavailable." };
   }
   const today = clinicToday();
-  const latest = await findLatestConsultationForDoctor(input.patientId, input.doctorId);
-  const revisit =
-    latest !== null &&
-    isRevisitFree(
-      { doctorId: latest.doctor_id, validUntil: latest.valid_until },
-      { doctorId: input.doctorId, on: today },
-    );
+  const { charge, previous } = await resolveRevisitContext(input.patientId, doctor, today);
+
+  if (charge.kind === "free") {
+    return {
+      ok: true,
+      data: {
+        kind: "free-revisit",
+        feePaise: 0,
+        validUntil: previous!.validUntil,
+        doctorName: doctor.name,
+      },
+    };
+  }
+  if (charge.kind === "tier") {
+    const tiers = doctor.revisit_tiers.map((t) => ({
+      throughDay: t.through_day,
+      pricePaise: Number(t.price_paise),
+    }));
+    return {
+      ok: true,
+      data: {
+        kind: "paid-revisit",
+        feePaise: charge.pricePaise,
+        validUntil: previous!.validUntil,
+        doctorName: doctor.name,
+        revisitDay: daysBetween(previous!.seriesStartedOn, today),
+        ladder: describeRevisitLadder({
+          freeThroughDay: daysBetween(previous!.seriesStartedOn, previous!.validUntil),
+          tiers,
+          fullFeePaise: Number(doctor.fee_paise),
+        }),
+        // describeRevisitLadder puts the free window first, so a tier's row is
+        // one past its index in the tier list.
+        currentBandIndex: 1 + tiers.findIndex((t) => t.throughDay === charge.throughDay),
+      },
+    };
+  }
   return {
     ok: true,
     data: {
-      kind: revisit ? "revisit" : "new",
-      feePaise: revisit ? 0 : Number(doctor.fee_paise),
-      validUntil: revisit ? latest!.valid_until : computeValidUntil(today, doctor.revisit_validity_days),
+      kind: "new",
+      feePaise: Number(doctor.fee_paise),
+      validUntil: computeValidUntil(today, doctor.revisit_validity_days),
       doctorName: doctor.name,
     },
   };
@@ -142,6 +236,12 @@ export interface DiscountAuthorization {
 // consultation is started, which re-verifies the PIN and re-derives the amounts.
 export async function authorizeDiscountAction(input: {
   doctorId: string;
+  // The patient this visit is for, when they already exist. It decides the
+  // SUBTOTAL the discount comes off: a reduced revisit rate is not the full fee,
+  // and discounting the wrong base would authorise the wrong money. Absent for a
+  // patient being registered in this same flow - who can have no prior visit, so
+  // the full fee is right by construction.
+  patientId?: string;
   pct?: number;
   amount?: string; // flat rupee amount, e.g. "150" or "150.50"
   pin: string;
@@ -165,7 +265,12 @@ export async function authorizeDiscountAction(input: {
   if (input.amount !== undefined && input.amount !== "" && !isValidRupees(input.amount)) {
     return { ok: false, formError: "Enter a valid discount amount." };
   }
-  const subtotalPaise = Number(doctor.fee_paise);
+  const subtotalPaise = input.patientId
+    ? (await resolveRevisitContext(input.patientId, doctor, clinicToday())).charge.pricePaise
+    : Number(doctor.fee_paise);
+  if (subtotalPaise <= 0) {
+    return { ok: false, formError: "There is nothing to discount - this visit is free." };
+  }
   const discountPaise = resolveDiscountPaise(subtotalPaise, {
     pct: input.pct,
     amount: input.amount,
@@ -197,10 +302,10 @@ export async function authorizeDiscountAction(input: {
 }
 
 export interface ConsultationOutcome {
-  kind: "new" | "revisit";
+  kind: "new" | "free-revisit" | "paid-revisit";
   consultationId: string;
-  billId: string | null; // null for a revisit (no bill is created) - print plan §2a/§2b
-  billNumber: string | null; // the token for a new consultation; null for a revisit
+  billId: string | null; // null for a FREE revisit (no bill is created) - print plan §2a/§2b
+  billNumber: string | null; // the token for anything billed; null for a free revisit
   patientId: string;
   patientCode: string;
   patientName: string;
@@ -209,13 +314,19 @@ export interface ConsultationOutcome {
   subtotalPaise: number;
   discountPaise: number;
   totalPaise: number;
-  paymentMode: PaymentModeValue | null; // null for a revisit
+  paymentMode: PaymentModeValue | null; // null for a free revisit
   approverName: string | null; // supervisor who approved a discount, if any
 }
 
-// Start a consultation. Free revisit (same doctor, still valid) → just a visit, no
-// bill. Otherwise a new consultation + first visit + finalized bill, with the
-// doctor's fee, chosen payment mode, and any supervisor-approved discount.
+// Start a consultation. Three outcomes, decided by the ONE resolver above:
+//   free-revisit  - inside the free window: another visit on the same
+//                   consultation, no bill, exactly as before.
+//   paid-revisit  - inside a reduced-rate window (migration 0027): its own
+//                   consultation row at that rate, with a real bill, carrying the
+//                   run's anchor and window forward so the taper keeps counting
+//                   from the first visit (migration 0028).
+//   new           - the taper has run out (or there is no prior run): a fresh
+//                   consultation at the full fee, anchored today.
 export async function startConsultationAction(
   input: unknown,
 ): Promise<ActionResult<ConsultationOutcome>> {
@@ -283,15 +394,10 @@ export async function startConsultationAction(
   }
 
   const today = clinicToday();
-  const latest = await findLatestConsultationForDoctor(patientId, v.doctorId);
-  const freeRevisit =
-    latest !== null &&
-    isRevisitFree(
-      { doctorId: latest.doctor_id, validUntil: latest.valid_until },
-      { doctorId: v.doctorId, on: today },
-    );
+  const { charge, previous } = await resolveRevisitContext(patientId, doctor, today);
 
-  if (freeRevisit) {
+  if (charge.kind === "free") {
+    const latest = previous!;
     await recordRevisit(latest.id, v.reason ? v.reason : null);
     await logActivity({
       actorId: s.sub,
@@ -305,7 +411,7 @@ export async function startConsultationAction(
     return {
       ok: true,
       data: {
-        kind: "revisit",
+        kind: "free-revisit",
         consultationId: latest.id,
         billId: null,
         billNumber: null,
@@ -313,7 +419,7 @@ export async function startConsultationAction(
         patientCode,
         patientName,
         doctorName: doctor.name,
-        validUntil: latest.valid_until,
+        validUntil: latest.validUntil,
         subtotalPaise: 0,
         discountPaise: 0,
         totalPaise: 0,
@@ -323,8 +429,10 @@ export async function startConsultationAction(
     };
   }
 
-  // New, paid consultation - compute the bill from authoritative values.
-  const subtotalPaise = Number(doctor.fee_paise);
+  // Billed from here down - a paid revisit and a new consultation take the same
+  // path and differ only in three values: the price, the window, and the anchor.
+  const paidRevisit = charge.kind === "tier";
+  const subtotalPaise = charge.pricePaise;
   const paymentMode: PaymentModeValue = v.paymentMode ?? "cash";
 
   let discountPaise = 0;
@@ -356,13 +464,33 @@ export async function startConsultationAction(
     return { ok: false, formError: "A discount needs supervisor approval." };
   }
   const totalPaise = computeTotalPaise(subtotalPaise, discountPaise);
-  const validUntil = computeValidUntil(today, doctor.revisit_validity_days);
+  // A paid revisit continues a run: it inherits that run's window and anchor
+  // rather than granting a fresh free period and restarting the taper (0028).
+  const validUntil =
+    paidRevisit && previous
+      ? previous.validUntil
+      : computeValidUntil(today, doctor.revisit_validity_days);
+  const seriesStartedOn = paidRevisit && previous ? previous.seriesStartedOn : today;
+
+  // Freeze the doctor's cut NOW, at the doctor's rate as it stands at this instant
+  // and on what this bill actually collects (migration 0025). A rate edited later
+  // must never move a figure that has already been printed on a payout slip and
+  // paid out of the drawer. Priced from the same `doctor` row this bill's fee came
+  // from, so the snapshot cannot disagree with the amount charged.
+  const doctorShare = snapshotDoctorShare(totalPaise, {
+    shareType: doctor.share_type === "flat" ? "flat" : "percentage",
+    sharePercentage: doctor.share_percentage,
+    // BIGINT arrives from pg as a string; null when the doctor is on a percentage.
+    shareFlatPaise: doctor.share_flat_paise == null ? null : Number(doctor.share_flat_paise),
+  });
 
   const { consultationId, billId, billNumber, replacedBillId } = await createConsultationWithBill({
     patientId,
     doctorId: v.doctorId,
     feeChargedPaise: subtotalPaise,
     validUntil,
+    seriesStartedOn,
+    revisitOfConsultationId: paidRevisit && previous ? previous.id : null,
     reason: v.reason ? v.reason : null,
     locationId,
     subtotalPaise,
@@ -372,15 +500,25 @@ export async function startConsultationAction(
     discountApprovedBy: approverId,
     createdBy: s.sub,
     replacesBillId: v.replacesBillId ?? null,
+    doctorShare,
   });
 
   await logActivity({
     actorId: s.sub,
-    action: "consultation.create",
+    action: paidRevisit ? "consultation.revisit_paid" : "consultation.create",
     entity: "consultation",
     targetId: consultationId,
     locationId,
-    details: { patient_id: patientId, doctor_id: v.doctorId, fee_charged_paise: subtotalPaise },
+    details: {
+      patient_id: patientId,
+      doctor_id: v.doctorId,
+      fee_charged_paise: subtotalPaise,
+      // Which run this continues, and at which rate - the audit trail for why
+      // this consultation was not billed at the doctor's listed fee.
+      ...(paidRevisit && previous
+        ? { revisit_of_consultation_id: previous.id, revisit_day: daysBetween(previous.seriesStartedOn, today) }
+        : {}),
+    },
   });
   await logActivity({
     actorId: s.sub,
@@ -417,7 +555,7 @@ export async function startConsultationAction(
   return {
     ok: true,
     data: {
-      kind: "new",
+      kind: paidRevisit ? "paid-revisit" : "new",
       consultationId,
       billId,
       billNumber,

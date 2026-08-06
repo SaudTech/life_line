@@ -60,6 +60,9 @@ export const ACTIVITY = {
   // ── Consultations / visits ─────────────────────────────────────────────
   "consultation.create":  { label: "Consultation started",      tone: "accent"  },
   "consultation.revisit": { label: "Free revisit recorded",     tone: "accent"  },
+  // A revisit past the free window, billed at one of the doctor's reduced rates
+  // (migration 0027) - money changed hands, so it is its own kind of event.
+  "consultation.revisit_paid": { label: "Revisit at reduced rate", tone: "accent" },
 
   // ── Bills ──────────────────────────────────────────────────────────────
   "bill.create":          { label: "Bill created",              tone: "accent"  },
@@ -68,6 +71,11 @@ export const ACTIVITY = {
   "bill.reissue":         { label: "Bill re-issued",            tone: "accent"  },
   "bill.reprint":         { label: "Bill reprinted",            tone: "accent"  },
   "receipt.printed":      { label: "Receipt printed",           tone: "accent"  },
+
+  // ── Doctor payouts (migration 0026) ────────────────────────────────────
+  // Cash leaving the drawer to a doctor. "success" like a finalized bill: it is a
+  // completed money movement, not a warning.
+  "doctor.payout":        { label: "Doctor paid",               tone: "success" },
 
   // ── Discounts ──────────────────────────────────────────────────────────
   "discount.request":     { label: "Discount pending approval", tone: "warning" },
@@ -100,6 +108,11 @@ export const ACTIVITY = {
 
   // ── System ─────────────────────────────────────────────────────────────
   "system.first_run_admin": { label: "Initial admin created",   tone: "accent"  },
+  // The break-glass account (lib/auth/super-admin.ts). A REPAIR is amber on purpose:
+  // it means the account had been deactivated, demoted, or had its password changed,
+  // and a restart put it back - which somebody should notice.
+  "system.super_admin_create": { label: "Super admin created",  tone: "accent"  },
+  "system.super_admin_repair": { label: "Super admin restored", tone: "warning" },
 } as const satisfies Record<string, ActivityMeta>;
 
 // The set of valid tags, as a type. logActivity takes this, so a typo fails to
